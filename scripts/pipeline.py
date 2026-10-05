@@ -435,9 +435,17 @@ def download_with_aria2(source: str, download_dir: Path) -> None:
         tracker_arg = ",".join(PUBLIC_TRACKERS)
         cmd.extend([
             "--seed-time=0",               # Stop seeding immediately once download completes
-            "--bt-stop-timeout=60",        # Timeout if no seeders/traffic for 60s (skip dead torrents fast)
+            "--bt-stop-timeout=45",        # Timeout if no seeders/traffic for 45s (skip dead torrents fast)
             f"--bt-tracker={tracker_arg}", # Inject fast DHT public trackers
             "--follow-torrent=mem",
+            "--enable-dht=true",
+            "--enable-peer-exchange=true",
+            "--bt-enable-lpd=true",
+            "--bt-max-peers=120",
+            "--bt-min-crypto-level=plain",
+            "--bt-require-crypto=false",
+            "--peer-id-prefix=-qB4520-",
+            "--peer-agent=qBittorrent/4.5.2",
         ])
     else:
         print("[Aria2c] Direct HTTP/HTTPS download mode initiated...")

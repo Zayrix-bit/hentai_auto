@@ -150,6 +150,19 @@ def fetch_sukebei_user_items(username: str = DEFAULT_TARGET_USER, max_pages: int
                     elif href.startswith("magnet:?"):
                         magnet_url = href
 
+                # Parse seeders count to skip dead torrents
+                tds = tr.find_all("td")
+                seeders = 0
+                if len(tds) >= 6:
+                    try:
+                        seeders = int(tds[5].get_text(strip=True).replace(",", ""))
+                    except (ValueError, TypeError):
+                        seeders = 0
+
+                # Skip dead torrents (0 seeders) immediately to prevent timeout slowdowns
+                if len(tds) >= 6 and seeders == 0:
+                    continue
+
                 source_link = torrent_url or magnet_url or view_url
                 if title and source_link and source_link not in seen_sources:
                     seen_sources.add(source_link)
@@ -160,6 +173,7 @@ def fetch_sukebei_user_items(username: str = DEFAULT_TARGET_USER, max_pages: int
                         "torrent": torrent_url,
                         "magnet": magnet_url,
                         "uploader": username,
+                        "seeders": seeders,
                     })
                     page_found += 1
 
@@ -244,6 +258,8 @@ def run_auto_watcher(max_new_videos: int = 2, target_user: str = DEFAULT_TARGET_
             new_items.append(it)
 
     print(f"[Auto Watcher] Found {len(new_items)} new unprocessed release(s).")
+    # Sort by seeders in descending order so fastest, healthiest torrents are processed first
+    new_items.sort(key=lambda x: x.get("seeders", 0), reverse=True)
     if not new_items:
         print("[Auto Watcher] Everything is up to date! Nothing to process.")
         return
