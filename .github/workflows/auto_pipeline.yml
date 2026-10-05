@@ -30,7 +30,7 @@ jobs:
   auto_upload:
     name: Worker ${{ matrix.worker.id }}/10
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -57,10 +57,11 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install aria2c & ffmpeg (Cloud Downloader & Optimizer)
+      - name: Install aria2 (Cloud Downloader)
+        timeout-minutes: 3
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq aria2 ffmpeg
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout="15" -qq || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends aria2 || sudo apt-get install -y aria2
 
       - name: Install Python Dependencies
         run: |
