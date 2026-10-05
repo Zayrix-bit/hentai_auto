@@ -57,7 +57,9 @@ $year          = isset($data['year']) ? intval($data['year']) : null;
 $anilist_id    = isset($data['anilist_id']) ? intval($data['anilist_id']) : null;
 $mal_id        = isset($data['mal_id']) ? intval($data['mal_id']) : null;
 $source_id     = isset($data['source_id']) ? $data['source_id'] : null;
+$season        = isset($data['season']) ? $data['season'] : null;
 $episode       = isset($data['episode']) ? $data['episode'] : null;
+$part          = isset($data['part']) ? $data['part'] : null;
 $score         = isset($data['score']) ? strval($data['score']) : null;
 
 try {
@@ -73,15 +75,17 @@ try {
             ADD COLUMN IF NOT EXISTS `anilist_id` INT NULL,
             ADD COLUMN IF NOT EXISTS `mal_id` INT NULL,
             ADD COLUMN IF NOT EXISTS `source_id` VARCHAR(100) NULL,
+            ADD COLUMN IF NOT EXISTS `season` VARCHAR(20) NULL,
             ADD COLUMN IF NOT EXISTS `episode` VARCHAR(50) NULL,
+            ADD COLUMN IF NOT EXISTS `part` VARCHAR(20) NULL,
             ADD COLUMN IF NOT EXISTS `score` VARCHAR(20) NULL;");
         $pdo->exec("ALTER TABLE `videos` MODIFY COLUMN `score` VARCHAR(20) NULL;");
     } catch (Exception $e) {}
 
     // Insert or update on duplicate video_id
     $sql = "INSERT INTO `videos` 
-            (`title`, `video_id`, `embed_url`, `watch_url`, `file_name`, `file_size_mb`, `source_input`, `poster_url`, `thumbnail_url`, `banner_url`, `description`, `genres`, `year`, `anilist_id`, `mal_id`, `source_id`, `episode`, `score`) 
-            VALUES (:title, :video_id, :embed_url, :watch_url, :file_name, :file_size_mb, :source_input, :poster_url, :thumbnail_url, :banner_url, :description, :genres, :year, :anilist_id, :mal_id, :source_id, :episode, :score)
+            (`title`, `video_id`, `embed_url`, `watch_url`, `file_name`, `file_size_mb`, `source_input`, `poster_url`, `thumbnail_url`, `banner_url`, `description`, `genres`, `year`, `anilist_id`, `mal_id`, `source_id`, `season`, `episode`, `part`, `score`) 
+            VALUES (:title, :video_id, :embed_url, :watch_url, :file_name, :file_size_mb, :source_input, :poster_url, :thumbnail_url, :banner_url, :description, :genres, :year, :anilist_id, :mal_id, :source_id, :season, :episode, :part, :score)
             ON DUPLICATE KEY UPDATE 
             `title` = VALUES(`title`),
             `embed_url` = VALUES(`embed_url`),
@@ -96,7 +100,9 @@ try {
             `anilist_id` = VALUES(`anilist_id`),
             `mal_id` = VALUES(`mal_id`),
             `source_id` = VALUES(`source_id`),
+            `season` = VALUES(`season`),
             `episode` = VALUES(`episode`),
+            `part` = VALUES(`part`),
             `score` = VALUES(`score`);";
 
     $stmt = $pdo->prepare($sql);
@@ -117,7 +123,9 @@ try {
         ':anilist_id'    => $anilist_id,
         ':mal_id'        => $mal_id,
         ':source_id'     => $source_id,
+        ':season'        => $season,
         ':episode'       => $episode,
+        ':part'          => $part,
         ':score'         => $score,
     ]);
 

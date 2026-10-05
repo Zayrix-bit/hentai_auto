@@ -20,7 +20,7 @@ import requests
 # Import core pipeline methods
 from pipeline import (
     download_with_aria2,
-    extract_episode,
+    extract_season_episode_part,
     extract_source_id,
     fetch_mal_metadata,
     locate_largest_video,
@@ -200,7 +200,10 @@ def run_auto_watcher(max_new_videos: int = 2) -> None:
                 except (requests.RequestException, ValueError, KeyError):
                     pass
 
-            episode = extract_episode(final_title) or extract_episode(video_file.name)
+            sep_info = extract_season_episode_part(final_title)
+            if not sep_info.get("episode"):
+                sep_info = extract_season_episode_part(video_file.name)
+
             source_id = extract_source_id(item["source"])
 
             record = {
@@ -219,7 +222,9 @@ def run_auto_watcher(max_new_videos: int = 2) -> None:
                 "mal_id": mal_meta.get("mal_id"),
                 "anilist_id": mal_meta.get("anilist_id"),
                 "source_id": source_id,
-                "episode": episode,
+                "season": sep_info.get("season", ""),
+                "episode": sep_info.get("episode", ""),
+                "part": sep_info.get("part", ""),
                 "score": mal_meta.get("score"),
                 "mal_url": mal_meta.get("mal_url") or "",
                 "uploaded_at": datetime.now(timezone.utc).isoformat(),

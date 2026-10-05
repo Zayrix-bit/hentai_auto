@@ -147,21 +147,74 @@ def extract_title_candidates(title: str) -> list[str]:
     return candidates
 
 
+def extract_season_episode_part(title: str) -> dict[str, str]:
+    """
+    Extracts structured season, episode, and part numbers from release titles.
+    Examples:
+      'Anime S01E08' -> season: '01', episode: '08', part: ''
+      'Anime - 02 Part 1' -> season: '01', episode: '02', part: '01'
+      'Anime S02E01' -> season: '02', episode: '01', part: ''
+      'Anime - 03 (Part B)' -> season: '01', episode: '03', part: 'B'
+    """
+    season = ""
+    episode = ""
+    part = ""
+
+    # Clean technical metadata tags that might contain confusing numbers
+    clean = re.sub(
+        r"\[(1080p|720p|480p|2160p|4k|HEVC|x264|x265|AAC|D-AUD|D-SUB|[0-9a-fA-F]{8})\]",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    )
+
+    # 1. Check for combined SxxExx (e.g. S01E08, S1E1)
+    s_e_match = re.search(r"\bS([0-9]{1,2})[\s._-]*E([0-9]{1,3})\b", clean, re.IGNORECASE)
+    if s_e_match:
+        season = s_e_match.group(1).zfill(2)
+        episode = s_e_match.group(2).zfill(2)
+    else:
+        # Separate Season regex
+        s_match = re.search(r"\b(?:season|s)\s*0?([0-9]{1,2})\b", clean, re.IGNORECASE)
+        if not s_match:
+            s_match = re.search(r"\b([0-9]{1,2})(?:st|nd|rd|th)\s*Season\b", clean, re.IGNORECASE)
+        if s_match:
+            season = s_match.group(1).zfill(2)
+
+        # Separate Episode regex
+        ep_patterns = [
+            r"(?:ep|e|#|\bepisode\b|\bact\b)\s*0?([0-9]{1,3})(?:v[0-9]+)?\b",
+            r"\s+-\s+0?([0-9]{1,3})(?:v[0-9]+)?\b",
+            r"\b([0-9]{2,3})\b",
+        ]
+        for pat in ep_patterns:
+            m = re.search(pat, clean, re.IGNORECASE)
+            if m:
+                episode = m.group(1).zfill(2)
+                break
+
+    # 2. Check for Part (e.g. Part 1, Part 02, Part A, Part B, pt.1, pt2, Part-2)
+    part_match = re.search(r"\b(?:part|pt)[\s._-]*#?0?([0-9]{1,2}|[a-zA-Z])\b", clean, re.IGNORECASE)
+    if part_match:
+        val = part_match.group(1)
+        part = val.zfill(2) if val.isdigit() else val.upper()
+
+    # Default season to '01' if episode is present but season wasn't explicitly stated
+    if episode and not season:
+        season = "01"
+
+    return {
+        "season": season,
+        "episode": episode,
+        "part": part,
+    }
+
+
 def extract_episode(title: str) -> str:
     """
-    Extracts 2-digit padded episode number from release title.
-    Supports S01E08, EP 08, E08, #08, - 08, etc.
+    Backwards compatibility helper for episode extraction.
     """
-    patterns = [
-        r"(?:s\d+e|ep|e|#|\bepisode\b)\s*([0-9]{1,4})(?:v[0-9]+)?\b",
-        r"\s+-\s+([0-9]{1,4})(?:v[0-9]+)?\b",
-        r"\b([0-9]{2,3})\b",
-    ]
-    for pat in patterns:
-        m = re.search(pat, title, re.IGNORECASE)
-        if m:
-            return m.group(1).zfill(2)
-    return ""
+    return extract_season_episode_part(title).get("episode", "")
 
 
 def extract_source_id(source_url: str) -> str:
@@ -609,18 +662,20 @@ def save_catalog(record: dict, repo_root: Path) -> None:
     md_lines = [
         "# 🎬 DropEmbed Video Catalog\n",
         f"*Total Videos Uploaded: {len(catalog)}*\n",
-        "| Date | Title | Ep | MAL | Score | Watch Link | Embed Player Link |",
-        "|---|---|---|---|---|---|---|",
+        "| Date | Title | Season | Episode | Part | MAL | Score | Watch Link | Embed Player Link |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for v in catalog:
         date_str = v.get("uploaded_at", "")[:10]
         v_title = v.get("title", "").replace("|", "\\|")
-        v_ep = v.get("episode") or "-"
+        v_season = f"S{v['season']}" if v.get("season") else "-"
+        v_ep = f"E{v['episode']}" if v.get("episode") else "-"
+        v_part = f"Pt.{v['part']}" if v.get("part") else "-"
         v_score = f"⭐ {v['score']}" if v.get("score") else "-"
         v_mal = f"[MAL #{v['mal_id']}]({v['mal_url']})" if v.get("mal_id") and v.get("mal_url") else (f"MAL #{v['mal_id']}" if v.get("mal_id") else "-")
         v_url = v.get("url", "")
         v_embed = v.get("embed_url", "")
-        md_lines.append(f"| {date_str} | **{v_title}** | {v_ep} | {v_mal} | {v_score} | [Watch]({v_url}) | [Embed Player]({v_embed}) |")
+        md_lines.append(f"| {date_str} | **{v_title}** | {v_season} | {v_ep} | {v_part} | {v_mal} | {v_score} | [Watch]({v_url}) | [Embed Player]({v_embed}) |")
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write("\n".join(md_lines) + "\n")
@@ -692,7 +747,9 @@ def write_github_summary(record: dict) -> None:
     v_mal_id = record.get("mal_id")
     v_mal_url = record.get("mal_url") or (f"https://myanimelist.net/anime/{v_mal_id}" if v_mal_id else "")
     v_score = record.get("score")
+    v_season = record.get("season")
     v_ep = record.get("episode")
+    v_part = record.get("part")
     v_source_id = record.get("source_id")
 
     poster_markdown = f"\n![Poster]({v_poster})\n" if v_poster else ""
@@ -706,7 +763,9 @@ def write_github_summary(record: dict) -> None:
 |---|---|
 | **Title** | **{v_title}** |
 | **Video ID** | `{v_id}` |
+| **Season** | `{v_season or 'N/A'}` |
 | **Episode** | `{v_ep or 'N/A'}` |
+| **Part** | `{v_part or 'N/A'}` |
 | **MyAnimeList** | {f'[{v_mal_id}]({v_mal_url})' if v_mal_id else 'N/A'} |
 | **Score** | {f'⭐ {v_score} / 10' if v_score else 'N/A'} |
 | **Source ID** | {f'#{v_source_id}' if v_source_id else 'N/A'} |
@@ -783,7 +842,10 @@ def main():
             except (requests.RequestException, ValueError, KeyError):
                 pass
 
-        episode = extract_episode(final_title) or extract_episode(video_file.name)
+        sep_info = extract_season_episode_part(final_title)
+        if not sep_info.get("episode"):
+            sep_info = extract_season_episode_part(video_file.name)
+
         source_id = extract_source_id(args.source)
 
         record = {
@@ -802,7 +864,9 @@ def main():
             "mal_id": mal_meta.get("mal_id"),
             "anilist_id": mal_meta.get("anilist_id"),
             "source_id": source_id,
-            "episode": episode,
+            "season": sep_info.get("season", ""),
+            "episode": sep_info.get("episode", ""),
+            "part": sep_info.get("part", ""),
             "score": mal_meta.get("score"),
             "mal_url": mal_meta.get("mal_url") or "",
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
