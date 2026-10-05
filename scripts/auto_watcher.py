@@ -10,12 +10,14 @@ import os
 import shutil
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
+from bs4 import BeautifulSoup
 
 # Import core pipeline methods
 from pipeline import (
@@ -31,7 +33,8 @@ from pipeline import (
     write_github_summary,
 )
 
-# Default public RSS feeds (Unblocked on GitHub cloud runners)
+# Default Sukebei uploader & general fallback RSS feeds (Unblocked on GitHub cloud runners)
+DEFAULT_TARGET_USER = "Doomdos"
 DEFAULT_RSS_FEEDS = [
     "https://sukebei.nyaa.si/?page=rss&c=1_1",  # English-translated Art/Anime
     "https://sukebei.nyaa.si/?page=rss",        # All latest releases
@@ -89,6 +92,87 @@ def fetch_feed_items(feed_url: str, max_items: int = 15) -> list[dict]:
     return items
 
 
+def fetch_sukebei_user_items(username: str = DEFAULT_TARGET_USER, max_pages: int = 3) -> list[dict]:
+    """
+    Scrapes user uploads from Sukebei Nyaa (e.g. https://sukebei.nyaa.si/user/Doomdos).
+    Supports both RSS feed and multi-page HTML parsing for comprehensive coverage.
+    """
+    items = []
+    seen_sources = set()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    # 1. Try official user RSS feed first (fastest)
+    rss_url = f"https://sukebei.nyaa.si/?page=rss&u={urllib.parse.quote(username)}"
+    rss_items = fetch_feed_items(rss_url, max_items=50)
+    for it in rss_items:
+        if it["source"] not in seen_sources:
+            seen_sources.add(it["source"])
+            it["uploader"] = username
+            items.append(it)
+
+    print(f"[Auto Watcher] Fetched {len(items)} items from {username} RSS feed.")
+
+    # 2. Scrape HTML user pages (for full catalogue / pagination)
+    for page in range(1, max_pages + 1):
+        page_url = f"https://sukebei.nyaa.si/user/{urllib.parse.quote(username)}?p={page}"
+        print(f"[Auto Watcher] Scraping {username} uploads page {page}: {page_url}...")
+        try:
+            req = urllib.request.Request(page_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                html = resp.read().decode("utf-8", errors="ignore")
+
+            soup = BeautifulSoup(html, "html.parser")
+            table = soup.find("table", class_="torrent-list")
+            if not table:
+                print(f"[Auto Watcher] No torrent table found on page {page}. Reached end of uploads.")
+                break
+
+            tbody = table.find("tbody")
+            rows = tbody.find_all("tr") if tbody else table.find_all("tr")
+            page_found = 0
+
+            for tr in rows:
+                links = tr.find_all("a")
+                title = ""
+                view_url = ""
+                torrent_url = ""
+                magnet_url = ""
+
+                for a in links:
+                    href = a.get("href", "")
+                    if href.startswith("/view/") and not href.endswith("#comments"):
+                        title = a.get("title") or a.get_text(strip=True)
+                        view_url = urllib.parse.urljoin("https://sukebei.nyaa.si", href)
+                    elif href.startswith("/download/") and href.endswith(".torrent"):
+                        torrent_url = urllib.parse.urljoin("https://sukebei.nyaa.si", href)
+                    elif href.startswith("magnet:?"):
+                        magnet_url = href
+
+                source_link = torrent_url or magnet_url or view_url
+                if title and source_link and source_link not in seen_sources:
+                    seen_sources.add(source_link)
+                    items.append({
+                        "title": title,
+                        "source": source_link,
+                        "guid": view_url or source_link,
+                        "uploader": username,
+                    })
+                    page_found += 1
+
+            print(f"[Auto Watcher] Page {page} found {page_found} new torrents from {username}.")
+            if page_found == 0:
+                break
+
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+            print(f"[Auto Watcher Warning] Could not scrape {username} page {page}: {e}")
+            break
+
+    print(f"[Auto Watcher] Total {len(items)} releases collected from provider {username}.")
+    return items
+
+
 def load_processed_guids(repo_root: Path) -> set:
     """
     Loads list of already processed video titles/IDs to prevent duplicate uploads.
@@ -112,9 +196,10 @@ def load_processed_guids(repo_root: Path) -> set:
     return processed
 
 
-def run_auto_watcher(max_new_videos: int = 2) -> None:
+def run_auto_watcher(max_new_videos: int = 2, target_user: str = DEFAULT_TARGET_USER, max_pages: int = 3) -> None:
     """
-    Main loop: Checks RSS, finds unprocessed items, downloads, uploads, and updates catalogs.
+    Main loop: Checks target uploader (e.g. Doomdos) and RSS feeds, finds unprocessed items,
+    downloads, uploads, and updates catalogs and database.
     Limits to `max_new_videos` per workflow run to stay well within GitHub Actions limits.
     """
     api_key = os.environ.get("DROPEMBED_API_KEY")
@@ -126,13 +211,23 @@ def run_auto_watcher(max_new_videos: int = 2) -> None:
     processed = load_processed_guids(repo_root)
     print(f"[Auto Watcher] Loaded {len(processed)} existing catalog records.")
 
-    # Collect items from feeds
     candidate_items = []
-    for feed in DEFAULT_RSS_FEEDS:
-        items = fetch_feed_items(feed)
-        if items:
-            candidate_items.extend(items)
-            break  # Got items from primary feed
+
+    # Priority 1: Fetch from target uploader (Doomdos)
+    if target_user:
+        print(f"[Auto Watcher] Targeting provider: {target_user}...")
+        user_items = fetch_sukebei_user_items(username=target_user, max_pages=max_pages)
+        if user_items:
+            candidate_items.extend(user_items)
+
+    # Priority 2: Fallback to general feeds if no candidate items found
+    if not candidate_items:
+        print("[Auto Watcher] Target user returned no items. Checking general RSS feeds...")
+        for feed in DEFAULT_RSS_FEEDS:
+            items = fetch_feed_items(feed)
+            if items:
+                candidate_items.extend(items)
+                break
 
     if not candidate_items:
         print("[Auto Watcher] No feed items found. Exiting.")
@@ -256,7 +351,14 @@ def run_auto_watcher(max_new_videos: int = 2) -> None:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Automated RSS Watcher for DropEmbed Pipeline")
-    parser.add_argument("max_count", nargs="?", type=int, default=2, help="Max new videos to process (default: 2)")
+    parser = argparse.ArgumentParser(description="Automated Sukebei/Nyaa Watcher for DropEmbed Pipeline")
+    parser.add_argument("max_count", nargs="?", type=int, default=None, help="Max new videos to process (positional shortcut)")
+    parser.add_argument("--max-videos", "-n", type=int, default=2, help="Max new videos to process (default: 2)")
+    parser.add_argument("--user", "-u", type=str, default=DEFAULT_TARGET_USER, help=f"Target Sukebei/Nyaa uploader (default: {DEFAULT_TARGET_USER})")
+    parser.add_argument("--pages", "-p", type=int, default=3, help="Max user profile pages to scrape (default: 3)")
     args = parser.parse_args()
-    run_auto_watcher(max_new_videos=args.max_count)
+
+    max_vids = args.max_count if args.max_count is not None else args.max_videos
+    target_u = os.environ.get("TARGET_UPLOADER", args.user)
+
+    run_auto_watcher(max_new_videos=max_vids, target_user=target_u, max_pages=args.pages)

@@ -6,10 +6,18 @@ on:
     - cron: '0 */4 * * *'
   workflow_dispatch:
     inputs:
+      target_user:
+        description: 'Target Sukebei/Nyaa uploader username (default: Doomdos)'
+        required: false
+        default: 'Doomdos'
       max_videos:
         description: 'Maximum new videos to download and upload in this run'
         required: false
         default: '2'
+      max_pages:
+        description: 'Maximum catalog pages to scrape from user profile'
+        required: false
+        default: '3'
 
 permissions:
   contents: write
@@ -41,15 +49,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r scripts/requirements.txt
 
-      - name: Run Auto Watcher (Feed -> AniList -> DropEmbed -> cPanel)
+      - name: Run Auto Watcher (Doomdos Sukebei -> MAL -> DropEmbed -> cPanel)
         env:
           DROPEMBED_API_KEY: ${{ secrets.DROPEMBED_API_KEY }}
           CPANEL_API_URL: ${{ secrets.CPANEL_API_URL }}
           CPANEL_API_SECRET: ${{ secrets.CPANEL_API_SECRET }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_UPLOADER: ${{ github.event.inputs.target_user || 'Doomdos' }}
         run: |
-          python scripts/auto_watcher.py "${{ github.event.inputs.max_videos || '2' }}"
+          python scripts/auto_watcher.py \
+            --user "${{ github.event.inputs.target_user || 'Doomdos' }}" \
+            --max-videos "${{ github.event.inputs.max_videos || '2' }}" \
+            --pages "${{ github.event.inputs.max_pages || '3' }}"
 
       - name: Commit and Push Updated Video Catalog
         run: |
