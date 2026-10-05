@@ -82,7 +82,7 @@
       const badge = document.getElementById('videoCountBadge');
       
       try {
-        const res = await fetch('get_videos.php');
+        const res = await fetch('api/get_videos.php');
         const data = await res.json();
         
         if (!data.success) {
