@@ -1,9 +1,10 @@
 # 🎬 DropEmbed Video Catalog
 
-*Total Videos Uploaded: 72*
+*Total Videos Uploaded: 73*
 
 | Date | Title | Season | Episode | Part | MAL | Score | Watch Link | Embed Player Link |
 |---|---|---|---|---|---|---|---|---|
+| 2026-10-05 | **[Doomdos] - My Classmate’s a Sexy Actress, and Now We Live Together! - 04 [Uncensored] [Dub] [1080p OV WEB-DL]** | S01 | E04 | - | [MAL #63619](https://myanimelist.net/anime/63619/Onaji_Zemi_no_Someya-san_ga_Sexy_Joyuu_datta_Hanashi) | ⭐ 6.27 | [Watch](https://dropembed.com/v/965f94ea-e66d-4b4a-b712-822b32fbc84c) | [Embed Player](https://dropembed.com/e/965f94ea-e66d-4b4a-b712-822b32fbc84c) |
 | 2026-10-05 | **[Doomdos] - The Lonely Snow Widow and the Cursed Ring - 01 [Uncensored] [1080p OV WEB-DL]** | S01 | E01 | - | [MAL #64298](https://myanimelist.net/anime/64298/Hitozukiai_ga_Nigate_na_Miboujin_no_Yukionna-san_to_Noroi_no_Yubiwa) | ⭐ 6.57 | [Watch](https://dropembed.com/v/b68b480f-4adf-4206-b9a1-3a2867b9c110) | [Embed Player](https://dropembed.com/e/b68b480f-4adf-4206-b9a1-3a2867b9c110) |
 | 2026-10-05 | **[Doomdos] - Now That I Can Control Reality With A Mouse Cursor, I'm Gonna Click Away On The Girls! - 01 [Uncensored] [1080p OV WEB-DL]** | S01 | E01 | - | [MAL #63381](https://myanimelist.net/anime/63381/Mouse_Cursor_de_Genjitsu_wo_Sousa_Dekiru_You_ni_Natta_node_Onna_no_Ko_wo_Ippai_Click_Shimaasu) | ⭐ 5.7 | [Watch](https://dropembed.com/v/894c76dc-52e8-4f61-9951-cd4993962a91) | [Embed Player](https://dropembed.com/e/894c76dc-52e8-4f61-9951-cd4993962a91) |
 | 2026-10-05 | **[Doomdos] - The Bird in a Shell 3 [Aisha Farfaris] - 01 [Uncensored] [480p OV WEB-DL]** | S01 | E01 | - | - | - | [Watch](https://dropembed.com/v/fc84788c-219e-453f-a868-bdde56ba2d4d) | [Embed Player](https://dropembed.com/e/fc84788c-219e-453f-a868-bdde56ba2d4d) |
