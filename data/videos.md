@@ -1,8 +1,13 @@
 # 🎬 DropEmbed Video Catalog
 
-*Total Videos Uploaded: 2*
+*Total Videos Uploaded: 7*
 
 | Date | Title | Season | Episode | Part | MAL | Score | Watch Link | Embed Player Link |
 |---|---|---|---|---|---|---|---|---|
+| 2026-10-05 | **[Doomdos] - My Classmate's a Sexy Actress, and Now We Live Together! - 04 [Uncensored] [Multi-Audio] [Multi-Sub] [1080p OV WEB-DL]** | S01 | E04 | - | [MAL #63619](https://myanimelist.net/anime/63619/Onaji_Zemi_no_Someya-san_ga_Sexy_Joyuu_datta_Hanashi) | ⭐ 6.27 | [Watch](https://dropembed.com/v/9832481f-26af-4cd0-956c-d3bc019c7820) | [Embed Player](https://dropembed.com/e/9832481f-26af-4cd0-956c-d3bc019c7820) |
+| 2026-10-05 | **[Doomdos] - What She Fell on Was the Tip of My Dick - 01 [Uncensored] [Dub] [1080p OV WEB-DL]** | S01 | E01 | - | [MAL #37281](https://myanimelist.net/anime/37281/Joshiochi_2-kai_kara_Onnanoko_ga_Futtekita) | ⭐ 6.56 | [Watch](https://dropembed.com/v/4c07fe11-d7af-4c3f-a8da-ae23b38804a5) | [Embed Player](https://dropembed.com/e/4c07fe11-d7af-4c3f-a8da-ae23b38804a5) |
+| 2026-10-05 | **[Doomdos] - Overflow - 03 [Uncensored] [Dub] [1080p OV WEB-DL]** | S01 | E03 | - | [MAL #40746](https://myanimelist.net/anime/40746/Overflow) | ⭐ 7.23 | [Watch](https://dropembed.com/v/ba20664f-14b4-4632-b769-32e109f371eb) | [Embed Player](https://dropembed.com/e/ba20664f-14b4-4632-b769-32e109f371eb) |
+| 2026-10-05 | **[Doomdos] - Overflow - 02 [Uncensored] [Dub] [1080p OV WEB-DL]** | S01 | E02 | - | [MAL #40746](https://myanimelist.net/anime/40746/Overflow) | ⭐ 7.23 | [Watch](https://dropembed.com/v/387bf922-a31b-4744-8bd6-b3004a4517e2) | [Embed Player](https://dropembed.com/e/387bf922-a31b-4744-8bd6-b3004a4517e2) |
+| 2026-10-05 | **[Doomdos] - Overflow - 01 [Uncensored] [Dub] [1080p OV WEB-DL]** | S01 | E01 | - | [MAL #40746](https://myanimelist.net/anime/40746/Overflow) | ⭐ 7.23 | [Watch](https://dropembed.com/v/1721c69c-080a-407e-9274-13e747d19c46) | [Embed Player](https://dropembed.com/e/1721c69c-080a-407e-9274-13e747d19c46) |
 | 2026-10-05 | **[Doomdos] - My Classmate's a Sexy Actress, and Now We Live Together! - 08 [Uncensored] [Dub] [1080p OV WEB-DL]** | S01 | E08 | - | [MAL #63619](https://myanimelist.net/anime/63619/Onaji_Zemi_no_Someya-san_ga_Sexy_Joyuu_datta_Hanashi) | ⭐ 6.27 | [Watch](https://dropembed.com/v/3ddd4f85-421b-49e2-8f2b-316a1113abe9) | [Embed Player](https://dropembed.com/e/3ddd4f85-421b-49e2-8f2b-316a1113abe9) |
 | 2026-10-05 | **[TokekHutan] My Classmate's a Sexy Actress, and Now We Live Together! - S01E08 (同じゼミの染谷さんがセクシー女優だった話。; Onaji Zemi no Someya-san ga Sexy Joyuu datta Hanashi.) [UNCENSORED, OVEIL.WEB-DL 1080P AVC, AAC D-AUD, D-SUB][8A4AC5A7]** | S01 | E08 | - | [MAL #63619](https://myanimelist.net/anime/63619/Onaji_Zemi_no_Someya-san_ga_Sexy_Joyuu_datta_Hanashi) | ⭐ 6.27 | [Watch](https://dropembed.com/v/0d1c520a-05ec-4b93-85d1-9523a012bce7) | [Embed Player](https://dropembed.com/e/0d1c520a-05ec-4b93-85d1-9523a012bce7) |
