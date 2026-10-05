@@ -46,6 +46,8 @@ jobs:
           DROPEMBED_API_KEY: ${{ secrets.DROPEMBED_API_KEY }}
           CPANEL_API_URL: ${{ secrets.CPANEL_API_URL }}
           CPANEL_API_SECRET: ${{ secrets.CPANEL_API_SECRET }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python scripts/auto_watcher.py "${{ github.event.inputs.max_videos || '2' }}"
 
