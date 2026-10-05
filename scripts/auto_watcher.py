@@ -285,7 +285,7 @@ def run_auto_watcher(max_new_videos: int = 2, target_user: str = DEFAULT_TARGET_
             thumb_url = animetosho_thumb or ""
             if not thumb_url and not mal_meta.get("poster_url") and video_id:
                 try:
-                    info_r = dropembed_api_request("GET", f"https://dropembed.com/api/videos/{video_id}", api_key, timeout=10)
+                    info_r = dropembed_api_request("GET", f"https://upload.dropembed.com/api/videos/{video_id}", api_key, timeout=10)
                     thumb_url = info_r.get("data", {}).get("thumbnail") or ""
                 except Exception:  # noqa: BLE001, S110
                     pass
