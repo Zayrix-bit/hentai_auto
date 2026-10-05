@@ -15,6 +15,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
+import requests
+
 # Import core pipeline methods
 from pipeline import (
     download_with_aria2,
@@ -183,6 +185,19 @@ def run_auto_watcher(max_new_videos: int = 2) -> None:
             embed_url = upload_res.get("embed_url") or f"https://dropembed.com/e/{video_id}"
             watch_url = upload_res.get("url") or f"https://dropembed.com/v/{video_id}"
 
+            thumb_url = animetosho_thumb or ""
+            if not thumb_url and not anilist_meta.get("poster_url") and video_id:
+                try:
+                    info_r = requests.get(
+                        f"https://dropembed.com/api/videos/{video_id}",
+                        headers={"X-API-Key": api_key},
+                        timeout=10,
+                    )
+                    if info_r.status_code == 200:
+                        thumb_url = info_r.json().get("data", {}).get("thumbnail") or ""
+                except (requests.RequestException, ValueError, KeyError):
+                    pass
+
             record = {
                 "title": final_title,
                 "video_id": video_id,
@@ -191,7 +206,7 @@ def run_auto_watcher(max_new_videos: int = 2) -> None:
                 "file_name": video_file.name,
                 "file_size_mb": round(video_file.stat().st_size / (1024 * 1024), 2),
                 "poster_url": anilist_meta.get("poster_url") or "",
-                "thumbnail_url": animetosho_thumb or "",
+                "thumbnail_url": thumb_url,
                 "banner_url": anilist_meta.get("banner_url") or "",
                 "description": anilist_meta.get("description") or "",
                 "genres": anilist_meta.get("genres") or "",
