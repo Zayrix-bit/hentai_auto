@@ -275,6 +275,36 @@ def save_catalog(record: dict, repo_root: Path) -> None:
     print(f"[Catalog] Updated {md_path}")
 
 
+def notify_cpanel_database(record: dict) -> None:
+    """
+    Sends video details to cPanel MySQL database via a secure PHP API webhook.
+    Requires CPANEL_API_URL and optional CPANEL_API_SECRET environment variables.
+    """
+    cpanel_url = os.environ.get("CPANEL_API_URL")
+    if not cpanel_url:
+        print("[cPanel DB] No CPANEL_API_URL configured. Skipping cPanel database sync.")
+        return
+
+    cpanel_secret = os.environ.get("CPANEL_API_SECRET", "")
+    print(f"[cPanel DB] Syncing record to cPanel API at {cpanel_url}...")
+
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "GitHubActions-DropEmbedPipeline/1.0"
+    }
+    if cpanel_secret:
+        headers["Authorization"] = f"Bearer {cpanel_secret}"
+
+    try:
+        resp = requests.post(cpanel_url, json=record, headers=headers, timeout=15)
+        if resp.status_code == 200:
+            print(f"[cPanel DB] Successfully synced to cPanel database: {resp.text}")
+        else:
+            print(f"[cPanel DB Warning] Sync failed (HTTP {resp.status_code}): {resp.text}")
+    except Exception as e:
+        print(f"[cPanel DB Warning] Could not connect to cPanel API: {e}")
+
+
 def write_github_summary(record: dict) -> None:
     """
     Writes a formatted Markdown summary to the GitHub Actions workflow run page.
@@ -361,10 +391,13 @@ def main():
             "source_input": args.source
         }
 
-        # Step 5: Save to Catalog
+        # Step 5: Save to Local Catalog
         save_catalog(record, repo_root)
 
-        # Step 6: GitHub Actions Step Summary
+        # Step 6: Sync to cPanel MySQL Database (if configured)
+        notify_cpanel_database(record)
+
+        # Step 7: GitHub Actions Step Summary
         write_github_summary(record)
 
         print("\n==========================================")

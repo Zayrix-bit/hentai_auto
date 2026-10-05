@@ -51,6 +51,8 @@ jobs:
       - name: Run Pipeline (Download & Cloud-to-Cloud Upload)
         env:
           DROPEMBED_API_KEY: ${{ secrets.DROPEMBED_API_KEY }}
+          CPANEL_API_URL: ${{ secrets.CPANEL_API_URL }}
+          CPANEL_API_SECRET: ${{ secrets.CPANEL_API_SECRET }}
         run: |
           python scripts/pipeline.py \
             --source "${{ github.event.inputs.source_url }}" \

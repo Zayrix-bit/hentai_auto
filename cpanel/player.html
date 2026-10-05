@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StreamVault — Cloud Video Player</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0b0d13; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+  </style>
+</head>
+<body class="text-zinc-100 min-h-screen flex flex-col">
+
+  <!-- Header -->
+  <header class="sticky top-0 z-40 bg-[#0e111a]/90 backdrop-blur-md border-b border-white/[0.08] px-5 py-3.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg bg-red-600 flex items-center justify-center font-black text-white text-base shadow-lg shadow-red-600/30">
+          ▶
+        </div>
+        <span class="font-extrabold text-lg tracking-tight text-white">Stream<span class="text-red-500">Vault</span></span>
+      </div>
+
+      <div class="flex-1 max-w-md mx-4">
+        <input id="searchInput" type="text" placeholder="Search videos..." class="w-full bg-[#161a26] border border-white/[0.1] rounded-xl px-4 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-red-500/80 transition-colors">
+      </div>
+
+      <div class="flex items-center gap-3 text-xs text-zinc-400">
+        <span id="videoCountBadge" class="bg-white/[0.06] border border-white/[0.08] px-3 py-1.5 rounded-lg mono text-zinc-300">0 Videos</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-7xl mx-auto w-full px-5 py-8">
+
+    <!-- Active Video Player Stage -->
+    <div id="playerStage" class="hidden mb-10 bg-[#121520] border border-white/[0.1] rounded-2xl p-4 sm:p-5 shadow-2xl shadow-black/80">
+      <div class="relative w-full aspect-video rounded-xl overflow-hidden bg-black mb-4 border border-white/[0.06]">
+        <iframe id="activeIframe" src="" class="absolute inset-0 w-full h-full" frameborder="0" allowfullscreen allow="autoplay; fullscreen"></iframe>
+      </div>
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2">
+        <div>
+          <h2 id="activeTitle" class="text-lg sm:text-xl font-bold text-white tracking-tight"></h2>
+          <div id="activeMeta" class="text-xs text-zinc-400 mono mt-1"></div>
+        </div>
+        <button onclick="closePlayer()" class="px-3.5 py-1.5 text-xs font-semibold bg-white/[0.08] hover:bg-white/[0.15] text-zinc-300 hover:text-white rounded-lg transition-colors">
+          ✕ Close Player
+        </button>
+      </div>
+    </div>
+
+    <!-- Video Grid -->
+    <div class="flex items-center justify-between mb-6">
+      <h3 class="text-xl font-bold text-white tracking-tight">Recent Uploads</h3>
+      <button onclick="loadVideos()" class="text-xs text-red-400 hover:text-red-300 transition-colors flex items-center gap-1 font-medium">
+        ↻ Refresh
+      </button>
+    </div>
+
+    <div id="videoGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+      <div class="col-span-full text-center py-16 text-zinc-500 text-sm">
+        Loading videos from database...
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="border-t border-white/[0.06] py-6 text-center text-xs text-zinc-500">
+    Powered by DropEmbed Unlimited Cloud Streaming & cPanel MySQL Database
+  </footer>
+
+  <script>
+    let allVideos = [];
+
+    async function loadVideos() {
+      const grid = document.getElementById('videoGrid');
+      const badge = document.getElementById('videoCountBadge');
+      
+      try {
+        const res = await fetch('get_videos.php');
+        const data = await res.json();
+        
+        if (!data.success) {
+          grid.innerHTML = `<div class="col-span-full text-center py-12 text-red-400">Failed to load videos: ${data.error}</div>`;
+          return;
+        }
+
+        allVideos = data.videos || [];
+        badge.innerText = `${data.total || allVideos.length} Videos`;
+        renderGrid(allVideos);
+      } catch (err) {
+        grid.innerHTML = `<div class="col-span-full text-center py-12 text-zinc-500">No connection or error fetching get_videos.php</div>`;
+      }
+    }
+
+    function renderGrid(videos) {
+      const grid = document.getElementById('videoGrid');
+      if (videos.length === 0) {
+        grid.innerHTML = `<div class="col-span-full text-center py-16 text-zinc-500">No videos found. Trigger a GitHub Action to add videos!</div>`;
+        return;
+      }
+
+      grid.innerHTML = videos.map(v => `
+        <div onclick="playVideo('${encodeURIComponent(v.embed_url)}', '${encodeURIComponent(v.title)}', '${v.file_size_mb || 0} MB', '${v.created_at}')"
+             class="group cursor-pointer bg-[#121520] hover:bg-[#181c2b] border border-white/[0.08] hover:border-red-500/40 rounded-xl overflow-hidden transition-all duration-300 hover:-translate-y-1 shadow-lg shadow-black/40">
+          <div class="relative aspect-video bg-zinc-950 flex items-center justify-center overflow-hidden">
+            <div class="w-12 h-12 rounded-full bg-red-600/90 text-white flex items-center justify-center pl-1 text-base group-hover:scale-110 transition-transform shadow-lg shadow-red-600/50">
+              ▶
+            </div>
+            <div class="absolute bottom-2 right-2 bg-black/80 px-2 py-0.5 rounded text-[11px] mono text-zinc-300">
+              ${v.file_size_mb ? v.file_size_mb + ' MB' : 'HD'}
+            </div>
+          </div>
+          <div class="p-3.5">
+            <h4 class="font-semibold text-sm text-zinc-100 group-hover:text-red-400 transition-colors line-clamp-2 mb-2 leading-snug">
+              ${escapeHtml(v.title)}
+            </h4>
+            <div class="flex items-center justify-between text-[11px] text-zinc-500 mono">
+              <span>${v.created_at ? v.created_at.substring(0, 10) : ''}</span>
+              <span class="text-red-400/80">Stream Ready</span>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function playVideo(embedUrl, title, size, date) {
+      const stage = document.getElementById('playerStage');
+      const iframe = document.getElementById('activeIframe');
+      const activeTitle = document.getElementById('activeTitle');
+      const activeMeta = document.getElementById('activeMeta');
+
+      iframe.src = decodeURIComponent(embedUrl);
+      activeTitle.innerText = decodeURIComponent(title);
+      activeMeta.innerText = `Uploaded: ${date} • Size: ${size}`;
+      stage.classList.remove('hidden');
+      stage.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function closePlayer() {
+      const stage = document.getElementById('playerStage');
+      const iframe = document.getElementById('activeIframe');
+      iframe.src = '';
+      stage.classList.add('hidden');
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      return text.replace(/[&<>"']/g, m => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[m]));
+    }
+
+    document.getElementById('searchInput').addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase().trim();
+      const filtered = allVideos.filter(v => (v.title || '').toLowerCase().includes(q));
+      renderGrid(filtered);
+    });
+
+    loadVideos();
+  </script>
+</body>
+</html>
