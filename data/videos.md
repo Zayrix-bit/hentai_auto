@@ -1,9 +1,11 @@
 # 🎬 DropEmbed Video Catalog
 
-*Total Videos Uploaded: 73*
+*Total Videos Uploaded: 75*
 
 | Date | Title | Season | Episode | Part | MAL | Score | Watch Link | Embed Player Link |
 |---|---|---|---|---|---|---|---|---|
+| 2026-10-05 | **[SakuraCircle] Overflow - 08 (おーばーふろぉ 第8話 姉妹にずっと無我夢中) - English Softsubs** | S01 | E08 | - | [MAL #40746](https://myanimelist.net/anime/40746/Overflow) | ⭐ 7.23 | [Watch](https://dropembed.com/v/6720c092-fe13-4072-b22e-76971d9c99d4) | [Embed Player](https://dropembed.com/e/6720c092-fe13-4072-b22e-76971d9c99d4) |
+| 2026-10-05 | **[Diogo4D] [WEB][1080p] Harem Camp! - 06 [2DE1D30F]** | S01 | E06 | - | [MAL #52717](https://myanimelist.net/anime/52717/Harem_Camp) | ⭐ 6.69 | [Watch](https://dropembed.com/v/8e24f4eb-0bbc-42ec-b773-abd481fdb029) | [Embed Player](https://dropembed.com/e/8e24f4eb-0bbc-42ec-b773-abd481fdb029) |
 | 2026-10-05 | **[Doomdos] - My Classmate’s a Sexy Actress, and Now We Live Together! - 04 [Uncensored] [Dub] [1080p OV WEB-DL]** | S01 | E04 | - | [MAL #63619](https://myanimelist.net/anime/63619/Onaji_Zemi_no_Someya-san_ga_Sexy_Joyuu_datta_Hanashi) | ⭐ 6.27 | [Watch](https://dropembed.com/v/965f94ea-e66d-4b4a-b712-822b32fbc84c) | [Embed Player](https://dropembed.com/e/965f94ea-e66d-4b4a-b712-822b32fbc84c) |
 | 2026-10-05 | **[Doomdos] - The Lonely Snow Widow and the Cursed Ring - 01 [Uncensored] [1080p OV WEB-DL]** | S01 | E01 | - | [MAL #64298](https://myanimelist.net/anime/64298/Hitozukiai_ga_Nigate_na_Miboujin_no_Yukionna-san_to_Noroi_no_Yubiwa) | ⭐ 6.57 | [Watch](https://dropembed.com/v/b68b480f-4adf-4206-b9a1-3a2867b9c110) | [Embed Player](https://dropembed.com/e/b68b480f-4adf-4206-b9a1-3a2867b9c110) |
 | 2026-10-05 | **[Doomdos] - Now That I Can Control Reality With A Mouse Cursor, I'm Gonna Click Away On The Girls! - 01 [Uncensored] [1080p OV WEB-DL]** | S01 | E01 | - | [MAL #63381](https://myanimelist.net/anime/63381/Mouse_Cursor_de_Genjitsu_wo_Sousa_Dekiru_You_ni_Natta_node_Onna_no_Ko_wo_Ippai_Click_Shimaasu) | ⭐ 5.7 | [Watch](https://dropembed.com/v/894c76dc-52e8-4f61-9951-cd4993962a91) | [Embed Player](https://dropembed.com/e/894c76dc-52e8-4f61-9951-cd4993962a91) |
