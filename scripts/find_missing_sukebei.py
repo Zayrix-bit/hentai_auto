@@ -14,25 +14,34 @@ MISSING_TARGETS = [
     {
         "series": "Overflow",
         "missing_eps": ["06", "08"],
-        "queries": ["Overflow 06", "Overflow 08"],
-        "alt_queries": ["おーばーふろぉ 06", "おーばーふろぉ 08"]
+        "queries": ["Overflow 06", "Overflow 08 [Eng]", "Overflow 08 1080p", "Overflow 08", "おーばーふろぉ 08"],
+        "alt_queries": ["Overflow complete", "Overflow 1080p"]
     },
     {
         "series": "What She Fell on Was the Tip of My Dick",
         "missing_eps": ["08"],
-        "queries": ["Joshiochi 08", "What She Fell on 08"],
+        "queries": ["What She Fell on 08", "Joshiochi 08", "Joshiochi 08 1080p"],
         "alt_queries": ["じょしおち 08"]
     },
     {
         "series": "Harem Camp",
         "missing_eps": ["02", "04", "05", "06", "07", "08"],
-        "queries": [f"Harem Camp {ep}" for ep in ["02", "04", "05", "06", "07", "08"]],
-        "alt_queries": [f"ハーレムきゃんぷっ {ep}" for ep in ["02", "04", "05", "06", "07", "08"]]
+        "queries": [
+            "Harem Camp! 02",
+            "Harem Camp 04 1080p",
+            "Harem Camp 05 1080p",
+            "Harem Camp 06 1080p",
+            "Harem Camp 07 1080p",
+            "Harem Camp 08 1080p",
+            "Harem Camp uncensored",
+            "Harem Camp [Eng]"
+        ],
+        "alt_queries": ["ハーレムきゃんぷっ"]
     },
     {
         "series": "Nightmare Campus",
         "missing_eps": ["01"],
-        "queries": ["Nightmare Campus 01", "Nightmare Campus 1"],
+        "queries": ["Nightmare Campus 1", "Nightmare Campus", "Nightmare Campus 01"],
         "alt_queries": []
     },
     {
