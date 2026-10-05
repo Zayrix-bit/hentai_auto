@@ -30,6 +30,7 @@ from pipeline import (
     extract_source_id,
     fetch_mal_metadata,
     locate_largest_video,
+    locate_all_videos,
     notify_cpanel_database,
     resolve_source,
     save_catalog,
@@ -504,92 +505,105 @@ def run_auto_watcher(
                 else:
                     raise
 
-            # 3. Locate video file
-            video_file = locate_largest_video(download_dir)
-            if not final_title:
-                final_title = video_file.stem
+            # 3. Locate video file(s) (single episode or complete batch release)
+            video_files = locate_all_videos(download_dir)
+            if not video_files:
+                video_files = [locate_largest_video(download_dir)]
 
-            # 4. Fetch Official MyAnimeList Metadata (MAL ID, Score, Poster, Synopsis, Genres)
-            mal_meta = fetch_mal_metadata(final_title)
+            print(f"[Auto Watcher] Found {len(video_files)} video file(s) in downloaded release.")
 
-            # 5. Stream upload to DropEmbed
-            upload_res = upload_to_dropembed(
-                video_path=video_file,
-                title=final_title,
-                api_key=api_key,
-            )
+            for video_file in video_files:
+                if len(video_files) > 1:
+                    cur_title = video_file.stem
+                else:
+                    cur_title = final_title or video_file.stem
 
-            video_id = upload_res.get("video_id", "")
-            embed_url = upload_res.get("embed_url") or f"https://dropembed.com/e/{video_id}"
-            watch_url = upload_res.get("url") or f"https://dropembed.com/v/{video_id}"
+                # Check if this specific episode file was already uploaded
+                if cur_title.strip().lower() in processed["raw_titles"]:
+                    print(f"[Auto Watcher] Episode file '{cur_title}' already uploaded. Skipping duplicate file.")
+                    continue
 
-            thumb_url = animetosho_thumb or ""
-            if not thumb_url and not mal_meta.get("poster_url") and video_id:
-                try:
-                    info_r = dropembed_api_request("GET", f"https://upload.dropembed.com/api/videos/{video_id}", api_key, timeout=10)
-                    thumb_url = info_r.get("data", {}).get("thumbnail") or ""
-                except Exception:
-                    pass
+                # 4. Fetch Official MyAnimeList Metadata (MAL ID, Score, Poster, Synopsis, Genres)
+                mal_meta = fetch_mal_metadata(cur_title)
 
-            sep_info = extract_season_episode_part(final_title)
-            if not sep_info.get("episode"):
-                sep_info = extract_season_episode_part(video_file.name)
+                # 5. Stream upload to DropEmbed
+                upload_res = upload_to_dropembed(
+                    video_path=video_file,
+                    title=cur_title,
+                    api_key=api_key,
+                )
 
-            source_id = extract_source_id(item["source"]) or item.get("source_id", "")
+                video_id = upload_res.get("video_id", "")
+                embed_url = upload_res.get("embed_url") or f"https://dropembed.com/e/{video_id}"
+                watch_url = upload_res.get("url") or f"https://dropembed.com/v/{video_id}"
 
-            record = {
-                "title": final_title,
-                "video_id": video_id,
-                "url": watch_url,
-                "embed_url": embed_url,
-                "file_name": video_file.name,
-                "file_size_mb": round(video_file.stat().st_size / (1024 * 1024), 2),
-                "poster_url": mal_meta.get("poster_url") or "",
-                "thumbnail_url": thumb_url,
-                "banner_url": mal_meta.get("banner_url") or "",
-                "description": mal_meta.get("synopsis") or mal_meta.get("description") or "",
-                "genres": mal_meta.get("genres") or "Hentai",
-                "year": mal_meta.get("year"),
-                "mal_id": mal_meta.get("mal_id"),
-                "anilist_id": mal_meta.get("anilist_id"),
-                "source_id": source_id,
-                "season": sep_info.get("season", ""),
-                "episode": sep_info.get("episode", ""),
-                "part": sep_info.get("part", ""),
-                "score": mal_meta.get("score"),
-                "mal_url": mal_meta.get("mal_url") or "",
-                "uploaded_at": datetime.now(timezone.utc).isoformat(),
-                "source_input": item["source"],
-            }
+                thumb_url = animetosho_thumb or ""
+                if not thumb_url and not mal_meta.get("poster_url") and video_id:
+                    try:
+                        info_r = dropembed_api_request("GET", f"https://upload.dropembed.com/api/videos/{video_id}", api_key, timeout=10)
+                        thumb_url = info_r.get("data", {}).get("thumbnail") or ""
+                    except Exception:
+                        pass
 
-            # 6. Save to local repository catalog
-            save_catalog(record, repo_root)
+                sep_info = extract_season_episode_part(cur_title)
+                if not sep_info.get("episode"):
+                    sep_info = extract_season_episode_part(video_file.name)
 
-            # 7. Sync to cPanel MySQL Database
-            notify_cpanel_database(record)
+                source_id = extract_source_id(item["source"]) or item.get("source_id", "")
 
-            # 8. GitHub Actions Summary
-            write_github_summary(record)
+                record = {
+                    "title": cur_title,
+                    "video_id": video_id,
+                    "url": watch_url,
+                    "embed_url": embed_url,
+                    "file_name": video_file.name,
+                    "file_size_mb": round(video_file.stat().st_size / (1024 * 1024), 2),
+                    "poster_url": mal_meta.get("poster_url") or "",
+                    "thumbnail_url": thumb_url,
+                    "banner_url": mal_meta.get("banner_url") or "",
+                    "description": mal_meta.get("synopsis") or mal_meta.get("description") or "",
+                    "genres": mal_meta.get("genres") or "Hentai",
+                    "year": mal_meta.get("year"),
+                    "mal_id": mal_meta.get("mal_id"),
+                    "anilist_id": mal_meta.get("anilist_id"),
+                    "source_id": source_id,
+                    "season": sep_info.get("season", ""),
+                    "episode": sep_info.get("episode", ""),
+                    "part": sep_info.get("part", ""),
+                    "score": mal_meta.get("score"),
+                    "mal_url": mal_meta.get("mal_url") or "",
+                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                    "source_input": item["source"],
+                }
 
-            # 9. Register in processed sets in-memory
-            if source_id:
-                processed["source_ids"].add(str(source_id))
-            processed["source_urls"].add(item["source"])
-            if item.get("torrent"):
-                processed["source_urls"].add(item["torrent"])
-            if item.get("magnet"):
-                processed["source_urls"].add(item["magnet"])
-            processed["raw_titles"].add(final_title.strip().lower())
-            norm_final = normalize_title(final_title)
-            if norm_final:
-                processed["normalized_titles"].add(norm_final)
-            if video_id:
-                processed["video_ids"].add(str(video_id))
-            # 10. Record for parallel matrix artifact merging
-            worker_records.append(record)
+                # 6. Save to local repository catalog
+                save_catalog(record, repo_root)
 
-            processed_count += 1
-            print(f"[Auto Watcher] Successfully processed ({processed_count}): {final_title}")
+                # 7. Sync to cPanel MySQL Database
+                notify_cpanel_database(record)
+
+                # 8. GitHub Actions Summary
+                write_github_summary(record)
+
+                # 9. Register in processed sets in-memory
+                if source_id:
+                    processed["source_ids"].add(str(source_id))
+                processed["source_urls"].add(item["source"])
+                if item.get("torrent"):
+                    processed["source_urls"].add(item["torrent"])
+                if item.get("magnet"):
+                    processed["source_urls"].add(item["magnet"])
+                processed["raw_titles"].add(cur_title.strip().lower())
+                norm_final = normalize_title(cur_title)
+                if norm_final:
+                    processed["normalized_titles"].add(norm_final)
+                if video_id:
+                    processed["video_ids"].add(str(video_id))
+                # 10. Record for parallel matrix artifact merging
+                worker_records.append(record)
+
+                processed_count += 1
+                print(f"[Auto Watcher] Successfully processed ({processed_count}): {cur_title}")
 
         except Exception as e:
             print(f"[Auto Watcher Error] Failed to process {item['title']}: {e}")

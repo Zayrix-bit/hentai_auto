@@ -39,6 +39,10 @@ PUBLIC_TRACKERS = [
     "udp://explodie.org:6969/announce",
     "udp://9.rarbg.to:2920/announce",
     "udp://tracker.torrent.eu.org:451/announce",
+    "http://sukebei.tracker.wf:8888/announce",
+    "udp://open.stealth.si:80/announce",
+    "udp://movies.zsw.ca:6969/announce",
+    "udp://tracker.dler.org:6969/announce",
 ]
 
 
@@ -435,7 +439,7 @@ def download_with_aria2(source: str, download_dir: Path) -> None:
         tracker_arg = ",".join(PUBLIC_TRACKERS)
         cmd.extend([
             "--seed-time=0",               # Stop seeding immediately once download completes
-            "--bt-stop-timeout=45",        # Timeout if no seeders/traffic for 45s (skip dead torrents fast)
+            "--bt-stop-timeout=90",        # Timeout if no seeders/traffic for 90s (give peers time to handshake)
             f"--bt-tracker={tracker_arg}", # Inject fast DHT public trackers
             "--follow-torrent=mem",
             "--enable-dht=true",
@@ -523,6 +527,25 @@ def locate_largest_video(download_dir: Path) -> Path:
     size_mb = size_bytes / (1024 * 1024)
     print(f"[Video Finder] Selected file: '{largest_file.name}' ({size_mb:.2f} MB)")
     return largest_file
+
+
+def locate_all_videos(download_dir: Path, min_size_mb: float = 10.0) -> list[Path]:
+    """
+    Finds all valid video files in the download directory, sorted by filename.
+    Filters out tiny samples or clips smaller than min_size_mb.
+    """
+    video_files = []
+    min_bytes = int(min_size_mb * 1024 * 1024)
+    for root, _, files in os.walk(download_dir):
+        for file in files:
+            ext = Path(file).suffix.lower()
+            if ext in VIDEO_EXTENSIONS:
+                file_path = Path(root) / file
+                if file_path.stat().st_size >= min_bytes:
+                    video_files.append(file_path)
+
+    video_files.sort(key=lambda x: x.name)
+    return video_files
 
 
 def dropembed_api_request(

@@ -1,122 +1,115 @@
-import urllib.request
-import urllib.parse
-import xml.etree.ElementTree as ET
+#!/usr/bin/env python3
+"""
+Sukebei Nyaa Missing Episodes Finder:
+Searches Sukebei Nyaa (HTML & RSS) for missing anime/hentai episodes across all providers/uploaders.
+Sorts strictly by real live seeders descending.
+Filters out already-uploaded episodes in data/videos.json.
+Outputs both data/missing_episodes_found.json and data/missing_targets.json.
+"""
+
 import json
 import re
 import sys
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
+from pathlib import Path
 from bs4 import BeautifulSoup
 
 # Ensure UTF-8 stdout
-sys.stdout.reconfigure(encoding='utf-8')
+sys.stdout.reconfigure(encoding="utf-8")
 
-# The exact missing episodes we discovered from our audit
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# The exact incomplete series requiring missing episodes
 MISSING_TARGETS = [
     {
-        "series": "Overflow",
-        "missing_eps": ["06", "08"],
-        "queries": ["Overflow 06", "Overflow 08 [Eng]", "Overflow 08 1080p", "Overflow 08", "おーばーふろぉ 08"],
-        "alt_queries": ["Overflow complete", "Overflow 1080p"]
-    },
-    {
-        "series": "What She Fell on Was the Tip of My Dick",
-        "missing_eps": ["08"],
-        "queries": ["What She Fell on 08", "Joshiochi 08", "Joshiochi 08 1080p"],
-        "alt_queries": ["じょしおち 08"]
-    },
-    {
         "series": "Harem Camp",
-        "missing_eps": ["02", "04", "05", "06", "07", "08"],
+        "missing_eps": ["04", "05", "07", "08"],
         "queries": [
-            "Harem Camp! 02",
-            "Harem Camp 04 1080p",
-            "Harem Camp 05 1080p",
-            "Harem Camp 06 1080p",
-            "Harem Camp 07 1080p",
-            "Harem Camp 08 1080p",
-            "Harem Camp uncensored",
-            "Harem Camp [Eng]"
+            "Harem Camp",
+            "ハーレムきゃんぷっ",
+            "後宮露營",
+            "Harem Camp 04",
+            "Harem Camp 05",
+            "Harem Camp 07",
+            "Harem Camp 08",
+            "Harem Camp 1080p",
+            "Harem Camp batch",
         ],
-        "alt_queries": ["ハーレムきゃんぷっ"]
     },
     {
         "series": "Nightmare Campus",
         "missing_eps": ["01"],
-        "queries": ["Nightmare Campus 1", "Nightmare Campus", "Nightmare Campus 01"],
-        "alt_queries": []
+        "queries": [
+            "Nightmare Campus",
+            "ナイトメア・キャンパス",
+            "Nightmare Campus 01",
+            "Nightmare Campus 1",
+            "Nightmare Campus 480p",
+        ],
     },
     {
         "series": "Sex on the Train with Horny Sluts",
         "missing_eps": ["01"],
-        "queries": ["Sex on the Train 01", "Sex on the Train 1"],
-        "alt_queries": []
+        "queries": [
+            "Sex on the Train",
+            "Sex on the Train with Horny Sluts",
+            "淫乱娘",
+            "Inshuu Densha",
+            "Sluts on the Train",
+        ],
     },
     {
         "series": "Bijukubo",
         "missing_eps": ["01"],
-        "queries": ["Bijukubo 01", "Bijukubo 1", "Bijukubo Part One"],
-        "alt_queries": ["美熟母 1"]
+        "queries": [
+            "Bijukubo",
+            "美熟母",
+            "Bijukubo 01",
+            "Bijukubo 1",
+            "Bijukubo Part One",
+        ],
     },
     {
         "series": "Fuzzy Lips",
         "missing_eps": ["02"],
-        "queries": ["Fuzzy Lips 02", "Fuzzy Lips 2"],
-        "alt_queries": []
-    }
+        "queries": [
+            "Fuzzy Lips",
+            "Furueru Kuchibiru",
+            "震える口唇",
+            "Fuzzy Lips 02",
+            "Fuzzy Lips 2",
+        ],
+    },
 ]
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 }
 
-def search_sukebei(query: str, category: str = "1_1", max_results: int = 10) -> list[dict]:
-    """Searches Sukebei Nyaa RSS and HTML for a query, sorted by seeders descending."""
+
+def search_sukebei_html(query: str, category: str = "1_1", max_results: int = 15) -> list[dict]:
+    """
+    Scrapes Sukebei Nyaa HTML search results sorted by seeders descending.
+    Extracts real seeders, magnet link, and direct torrent download link.
+    """
     encoded_q = urllib.parse.quote(query)
-    
-    # 1. Try RSS feed (fastest & structured)
-    rss_url = f"https://sukebei.nyaa.si/?page=rss&f=0&c={category}&q={encoded_q}&s=seeders&o=desc"
+    url = f"https://sukebei.nyaa.si/?f=0&c={category}&q={encoded_q}&s=seeders&o=desc"
     results = []
-    try:
-        req = urllib.request.Request(rss_url, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            content = resp.read()
-            root = ET.fromstring(content)
-            for item in root.findall('./channel/item')[:max_results]:
-                title = item.find('title').text if item.find('title') is not None else ''
-                link = item.find('link').text if item.find('link') is not None else ''
-                guid = item.find('guid').text if item.find('guid') is not None else ''
-                
-                sid = guid.split('/')[-1] if '/' in guid else ''
-                torrent_url = f"https://sukebei.nyaa.si/download/{sid}.torrent" if sid.isdigit() else link
-                
-                results.append({
-                    "title": title,
-                    "torrent": torrent_url,
-                    "link": link,
-                    "guid": guid,
-                    "source_id": sid,
-                    "source": "rss"
-                })
-    except Exception as e:
-        # RSS might fail or return nothing, proceed to HTML
-        pass
 
-    if results:
-        return results
-
-    # 2. Try HTML search page
-    html_url = f"https://sukebei.nyaa.si/?f=0&c={category}&q={encoded_q}&s=seeders&o=desc"
     try:
-        req = urllib.request.Request(html_url, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            html = resp.read().decode('utf-8', errors='ignore')
-        
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+
         soup = BeautifulSoup(html, "html.parser")
         table = soup.find("table", class_="torrent-list")
         if not table:
             return results
 
         rows = table.find_all("tr")
-        for tr in rows[1:max_results+1]:
+        for tr in rows[1 : max_results + 1]:
             links = tr.find_all("a")
             title = ""
             view_url = ""
@@ -137,52 +130,131 @@ def search_sukebei(query: str, category: str = "1_1", max_results: int = 10) -> 
             if len(tds) >= 6:
                 try:
                     seeders = int(tds[5].get_text(strip=True).replace(",", ""))
-                except:
+                except (ValueError, TypeError):
                     seeders = 0
 
-            sid = view_url.split('/')[-1] if view_url else ""
-            if title and (torrent_url or magnet_url or view_url):
+            sid = view_url.split("/")[-1] if view_url else ""
+            if not sid and torrent_url:
+                sid = torrent_url.split("/")[-1].replace(".torrent", "")
+
+            source_link = torrent_url or magnet_url or view_url
+            if title and source_link:
                 results.append({
                     "title": title,
                     "torrent": torrent_url or view_url,
                     "magnet": magnet_url,
+                    "source": source_link,
                     "seeders": seeders,
                     "source_id": sid,
-                    "source": "html"
+                    "view_url": view_url,
                 })
     except Exception as e:
-        pass
+        print(f"    [Search Warning] HTML search failed for '{query}' ({category}): {e}")
 
     return results
 
+
 def find_all_missing():
-    print("=== SUKEBEI SEARCH FOR MISSING EPISODES ===")
-    found_summary = {}
+    print("=== SEARCHING SUKEBEI NYAA FOR MISSING EPISODES ===")
+
+    # Load existing catalog to avoid redundant searches
+    json_path = REPO_ROOT / "data" / "videos.json"
+    existing_titles = set()
+    existing_sids = set()
+    if json_path.exists():
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                cat = json.load(f)
+                for item in cat:
+                    t = item.get("title")
+                    if t:
+                        existing_titles.add(t.strip().lower())
+                    sid = item.get("source_id")
+                    if sid:
+                        existing_sids.add(str(sid))
+        except Exception:
+            pass
+
+    found_by_series = {}
+    verified_targets = []
+    seen_torrent_sids = set()
 
     for target in MISSING_TARGETS:
         series_name = target["series"]
-        print(f"\nSearching for Series: {series_name} (Missing: {target['missing_eps']})")
-        found_summary[series_name] = {}
+        print(f"\n🔍 Searching for Series: {series_name} (Missing: {target['missing_eps']})")
+        found_by_series[series_name] = []
 
+        all_series_results = []
         for q in target["queries"]:
             print(f"  > Query: '{q}' ...", end=" ", flush=True)
-            results = search_sukebei(q)
-            if not results and target["alt_queries"]:
-                # Try first alt query
-                results = search_sukebei(target["alt_queries"][0])
+            # Try English anime category 1_1 first
+            res = search_sukebei_html(q, category="1_1", max_results=10)
+            if not res:
+                # Fallback to all categories 0_0
+                res = search_sukebei_html(q, category="0_0", max_results=10)
 
-            if results:
-                best = results[0]
-                print(f"FOUND! [{best.get('title')}] (ID: {best.get('source_id')})")
-                found_summary[series_name][q] = best
+            print(f"found {len(res)} results.")
+            for r in res:
+                # Only keep active torrents
+                if r.get("seeders", 0) > 0 or r.get("source_id"):
+                    all_series_results.append(r)
+
+        # Deduplicate and sort by seeders descending
+        unique_results = {}
+        for r in all_series_results:
+            sid = str(r.get("source_id", ""))
+            t_lower = r.get("title", "").strip().lower()
+            key = sid or t_lower
+            if key not in unique_results:
+                unique_results[key] = r
             else:
-                print("Not found.")
+                if r.get("seeders", 0) > unique_results[key].get("seeders", 0):
+                    unique_results[key] = r
 
-    # Save findings to JSON
-    with open("data/missing_episodes_found.json", "w", encoding="utf-8") as f:
-        json.dump(found_summary, f, indent=2, ensure_ascii=False)
-    
-    print("\nSaved search results to data/missing_episodes_found.json")
+        sorted_res = sorted(unique_results.values(), key=lambda x: x.get("seeders", 0), reverse=True)
+        found_by_series[series_name] = sorted_res
+
+        # Select top candidates for missing_targets.json
+        for candidate in sorted_res:
+            sid = str(candidate.get("source_id", ""))
+            t_lower = candidate.get("title", "").strip().lower()
+
+            if sid and sid in existing_sids:
+                continue
+            if t_lower in existing_titles:
+                continue
+            if sid and sid in seen_torrent_sids:
+                continue
+
+            verified_targets.append({
+                "title": candidate["title"],
+                "source": candidate["torrent"],
+                "torrent": candidate["torrent"],
+                "magnet": candidate.get("magnet", ""),
+                "source_id": sid,
+                "seeders": candidate.get("seeders", 0),
+                "series": series_name,
+            })
+            if sid:
+                seen_torrent_sids.add(sid)
+
+    # Save complete findings
+    findings_path = REPO_ROOT / "data" / "missing_episodes_found.json"
+    with open(findings_path, "w", encoding="utf-8") as f:
+        json.dump(found_by_series, f, indent=2, ensure_ascii=False)
+    print(f"\n[Saved] Detailed search results -> {findings_path}")
+
+    # Save actionable targets
+    targets_path = REPO_ROOT / "data" / "missing_targets.json"
+    with open(targets_path, "w", encoding="utf-8") as f:
+        json.dump(verified_targets, f, indent=2, ensure_ascii=False)
+    print(f"[Saved] {len(verified_targets)} verified targets -> {targets_path}")
+
+    # Summary
+    print("\n=== VERIFIED MISSING TARGETS SUMMARY ===")
+    for idx, t in enumerate(verified_targets, 1):
+        print(f"  {idx}. [{t['series']}] (Seeders: {t['seeders']}) {t['title']} (ID: {t['source_id']})")
+
 
 if __name__ == "__main__":
     find_all_missing()

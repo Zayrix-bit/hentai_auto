@@ -34,14 +34,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: missing-episodes-found
-          path: data/missing_episodes_found.json
+          path: |
+            data/missing_episodes_found.json
+            data/missing_targets.json
           if-no-files-found: warn
 
       - name: Commit and Push Findings
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/missing_episodes_found.json
+          git add data/missing_episodes_found.json data/missing_targets.json
           if git diff --staged --quiet; then
             echo "No new findings."
           else
