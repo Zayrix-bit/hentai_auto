@@ -491,6 +491,80 @@ def locate_largest_video(download_dir: Path) -> Path:
     return largest_file
 
 
+def dropembed_api_request(
+    method: str,
+    url: str,
+    api_key: str,
+    payload: dict | None = None,
+    timeout: int = 30,
+) -> dict:
+    """
+    Executes an API request to DropEmbed with multi-tier Cloudflare bypass:
+    1. curl_cffi with Chrome 120 browser impersonation.
+    2. Native system curl binary with browser headers.
+    3. Standard requests fallback.
+    Guarantees bypass of Cloudflare Managed Challenges on datacenter IPs.
+    """
+    method = method.upper()
+    headers = {
+        "X-API-Key": api_key,
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    }
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+
+    # Strategy 1: curl_cffi (Chrome TLS fingerprint)
+    try:
+        from curl_cffi import requests as cffi_requests
+
+        if method == "POST":
+            r = cffi_requests.post(url, json=payload, headers=headers, impersonate="chrome120", timeout=timeout)
+        elif method == "PATCH":
+            r = cffi_requests.patch(url, json=payload, headers=headers, impersonate="chrome120", timeout=timeout)
+        else:
+            r = cffi_requests.get(url, headers=headers, impersonate="chrome120", timeout=timeout)
+
+        if r.status_code in (200, 201):
+            return r.json()
+        print(f"[DropEmbed API] curl_cffi HTTP {r.status_code}. Trying system curl fallback...")
+    except Exception as cffi_err:  # noqa: BLE001
+        print(f"[DropEmbed API] curl_cffi attempt failed: {cffi_err}. Trying system curl fallback...")
+
+    # Strategy 2: System curl binary
+    try:
+        curl_bin = shutil.which("curl") or shutil.which("curl.exe")
+        if curl_bin:
+            cmd = [
+                curl_bin, "-s",
+                "-X", method, url,
+                "-H", f"X-API-Key: {api_key}",
+                "-H", "Accept: application/json",
+                "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            ]
+            if payload is not None:
+                cmd.extend(["-H", "Content-Type: application/json", "--data-raw", json.dumps(payload)])
+
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+            if proc.returncode == 0 and proc.stdout:
+                return json.loads(proc.stdout)
+            print(f"[DropEmbed API] system curl exit {proc.returncode}. Trying requests...")
+    except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as curl_err:
+        print(f"[DropEmbed API] system curl warning: {curl_err}. Trying requests...")
+
+    # Strategy 3: Standard requests
+    try:
+        if method == "POST":
+            r = requests.post(url, json=payload, headers=headers, timeout=timeout)
+        elif method == "PATCH":
+            r = requests.patch(url, json=payload, headers=headers, timeout=timeout)
+        else:
+            r = requests.get(url, headers=headers, timeout=timeout)
+        return r.json()
+    except (requests.RequestException, json.JSONDecodeError, ValueError) as req_err:
+        raise RuntimeError(f"All DropEmbed API request methods failed for {url}: {req_err}") from req_err
+
+
 def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: str = "") -> dict:
     """
     Uploads video file to DropEmbed with 100% ORIGINAL PRISTINE QUALITY (1080p HD).
@@ -592,33 +666,18 @@ def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: s
 
         print("[DropEmbed 1080p Relay] Submitting direct 1080p link to DropEmbed remote-upload...")
         remote_url = "https://dropembed.com/api/videos/remote-upload"
-        api_headers = {
-            "X-API-Key": api_key,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        }
         payload = {"urls": [direct_url]}
 
         data = None
         for attempt in range(1, 4):
             try:
-                res = requests.post(remote_url, json=payload, headers=api_headers, timeout=30)
-                print(f"[DropEmbed 1080p Relay] remote-upload attempt {attempt}: HTTP {res.status_code}")
-                if res.status_code == 200:
-                    try:
-                        res_json = res.json()
-                        if res_json.get("success"):
-                            data = res_json
-                            break
-                        else:
-                            print(f"[DropEmbed 1080p Relay] DropEmbed response: {res_json}")
-                    except (json.JSONDecodeError, ValueError) as err:
-                        print(f"[DropEmbed 1080p Relay] JSON decode error: {err}. Body: {res.text[:300]}")
-                else:
-                    print(f"[DropEmbed 1080p Relay] Non-200 status {res.status_code}. Body: {res.text[:300]}")
-            except requests.RequestException as e:
-                print(f"[DropEmbed 1080p Relay] POST request attempt {attempt} error: {e}")
+                res_data = dropembed_api_request("POST", remote_url, api_key, payload=payload, timeout=30)
+                if res_data.get("success"):
+                    data = res_data
+                    break
+                print(f"[DropEmbed 1080p Relay] Attempt {attempt} response: {res_data}")
+            except Exception as e:  # noqa: BLE001
+                print(f"[DropEmbed 1080p Relay] Attempt {attempt} failed: {e}")
             time.sleep(3)
 
         if not data or not data.get("success"):
@@ -632,15 +691,14 @@ def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: s
         else:
             # Fallback: check videos list if already queued
             try:
-                list_res = requests.get("https://dropembed.com/api/videos", headers=api_headers, timeout=15)
-                if list_res.status_code == 200:
-                    v_list = list_res.json().get("data", [])
-                    for v in v_list:
-                        desc = v.get("description") or ""
-                        if direct_url in desc or raw_asset_url in desc:
-                            video_id = v.get("id")
-                            break
-            except (requests.RequestException, ValueError, KeyError) as list_err:
+                list_res = dropembed_api_request("GET", "https://dropembed.com/api/videos", api_key, timeout=15)
+                v_list = list_res.get("data", [])
+                for v in v_list:
+                    desc = v.get("description") or ""
+                    if direct_url in desc or raw_asset_url in desc:
+                        video_id = v.get("id")
+                        break
+            except Exception as list_err:  # noqa: BLE001
                 print(f"[DropEmbed 1080p Relay] Video list fallback warning: {list_err}")
 
         if not video_id:
@@ -651,8 +709,8 @@ def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: s
         # Update title on DropEmbed
         try:
             patch_url = f"https://dropembed.com/api/videos/{video_id}"
-            requests.patch(patch_url, json={"title": title}, headers=api_headers, timeout=10)
-        except requests.RequestException:
+            dropembed_api_request("PATCH", patch_url, api_key, payload={"title": title}, timeout=10)
+        except Exception:  # noqa: BLE001, S110
             pass
 
         # Wait for DropEmbed servers to finish downloading the asset before deleting the release
@@ -662,20 +720,18 @@ def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: s
         for poll_i in range(30):
             time.sleep(5)
             try:
-                poll_res = requests.get(poll_url, headers=api_headers, timeout=15)
-                if poll_res.status_code == 200:
-                    poll_data = poll_res.json().get("data", {})
-                    v_status = poll_data.get("status")
-                    v_size = poll_data.get("file_size", 0)
-                    print(f"[DropEmbed 1080p Relay] Status: {v_status} | Size: {v_size} bytes ({(poll_i + 1) * 5}s)")
-                    if v_status in ("processing", "ready") or (v_size and v_size > 0):
-                        print("[DropEmbed 1080p Relay] Transfer completed! DropEmbed has received full 1080p file.")
-                        transfer_done = True
-                        break
-                    elif v_status == "error":
-                        print("[DropEmbed 1080p Relay] DropEmbed reported error during transfer.")
-                        break
-            except requests.RequestException as poll_err:
+                poll_data = dropembed_api_request("GET", poll_url, api_key, timeout=15).get("data", {})
+                v_status = poll_data.get("status")
+                v_size = poll_data.get("file_size", 0)
+                print(f"[DropEmbed 1080p Relay] Status: {v_status} | Size: {v_size} bytes ({(poll_i + 1) * 5}s)")
+                if v_status in ("processing", "ready") or (v_size and v_size > 0):
+                    print("[DropEmbed 1080p Relay] Transfer completed! DropEmbed has received full 1080p file.")
+                    transfer_done = True
+                    break
+                elif v_status == "error":
+                    print("[DropEmbed 1080p Relay] DropEmbed reported error during transfer.")
+                    break
+            except Exception as poll_err:  # noqa: BLE001
                 print(f"[DropEmbed 1080p Relay] Poll check warning: {poll_err}")
 
         if not transfer_done:
@@ -912,17 +968,9 @@ def main():
         thumb_url = animetosho_thumb or ""
         if not thumb_url and not mal_meta.get("poster_url") and video_id:
             try:
-                info_r = requests.get(
-                    f"https://dropembed.com/api/videos/{video_id}",
-                    headers={
-                        "X-API-Key": api_key,
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                    },
-                    timeout=10,
-                )
-                if info_r.status_code == 200:
-                    thumb_url = info_r.json().get("data", {}).get("thumbnail") or ""
-            except (requests.RequestException, ValueError, KeyError):
+                info_r = dropembed_api_request("GET", f"https://dropembed.com/api/videos/{video_id}", api_key, timeout=10)
+                thumb_url = info_r.get("data", {}).get("thumbnail") or ""
+            except Exception:  # noqa: BLE001, S110
                 pass
 
         sep_info = extract_season_episode_part(final_title)

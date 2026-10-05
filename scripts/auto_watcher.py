@@ -16,12 +16,12 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
-import requests
 from bs4 import BeautifulSoup
 
 # Import core pipeline methods
 from pipeline import (
     download_with_aria2,
+    dropembed_api_request,
     extract_season_episode_part,
     extract_source_id,
     fetch_mal_metadata,
@@ -285,17 +285,9 @@ def run_auto_watcher(max_new_videos: int = 2, target_user: str = DEFAULT_TARGET_
             thumb_url = animetosho_thumb or ""
             if not thumb_url and not mal_meta.get("poster_url") and video_id:
                 try:
-                    info_r = requests.get(
-                        f"https://dropembed.com/api/videos/{video_id}",
-                        headers={
-                            "X-API-Key": api_key,
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                        },
-                        timeout=10,
-                    )
-                    if info_r.status_code == 200:
-                        thumb_url = info_r.json().get("data", {}).get("thumbnail") or ""
-                except (requests.RequestException, ValueError, KeyError):
+                    info_r = dropembed_api_request("GET", f"https://dropembed.com/api/videos/{video_id}", api_key, timeout=10)
+                    thumb_url = info_r.get("data", {}).get("thumbnail") or ""
+                except Exception:  # noqa: BLE001, S110
                     pass
 
             sep_info = extract_season_episode_part(final_title)
