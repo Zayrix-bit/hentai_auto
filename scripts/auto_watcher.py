@@ -159,8 +159,8 @@ def fetch_sukebei_user_items(username: str = DEFAULT_TARGET_USER, max_pages: int
                     except (ValueError, TypeError):
                         seeders = 0
 
-                # Skip dead torrents (0 seeders) immediately to prevent timeout slowdowns
-                if len(tds) >= 6 and seeders == 0:
+                # Skip dead and slow torrents (< 2 seeders) immediately to prevent timeout slowdowns
+                if len(tds) >= 6 and seeders < 2:
                     continue
 
                 source_link = torrent_url or magnet_url or view_url
