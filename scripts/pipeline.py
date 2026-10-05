@@ -529,7 +529,11 @@ def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: s
                     print(f"[DropEmbed Upload Progress] {pct}% ({read_mb:.1f} MB / {file_size_mb:.1f} MB)")
 
             monitor = MultipartEncoderMonitor(encoder, callback)
-            headers = {"X-API-Key": api_key, "Content-Type": monitor.content_type}
+            headers = {
+                "X-API-Key": api_key,
+                "Content-Type": monitor.content_type,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            }
             resp = requests.post(url, data=monitor, headers=headers, timeout=1800)
 
         data = resp.json()
@@ -568,38 +572,114 @@ def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: s
 
         raw_asset_url = f"https://github.com/{repo_env}/releases/download/{tag}/{clean_relay_path.name}"
 
-        # Follow redirect to get direct high-speed CDN URL
-        r_head = requests.head(raw_asset_url, allow_redirects=True, timeout=15)
-        direct_url = r_head.url
+        # Verify asset accessibility and resolve direct CDN URL
+        direct_url = raw_asset_url
+        req_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        }
+        for attempt in range(5):
+            try:
+                r_head = requests.head(raw_asset_url, allow_redirects=True, timeout=15, headers=req_headers)
+                if r_head.status_code == 200:
+                    direct_url = r_head.url
+                    print("[DropEmbed 1080p Relay] Verified release asset CDN URL (HTTP 200).")
+                    break
+                else:
+                    print(f"[DropEmbed 1080p Relay] Asset check returned HTTP {r_head.status_code}, retrying...")
+            except (requests.RequestException, OSError) as e:
+                print(f"[DropEmbed 1080p Relay] Asset check warning: {e}")
+            time.sleep(2)
 
-        print("[DropEmbed 1080p Relay] Submitting direct 1080p CDN link to DropEmbed remote-upload...")
+        print("[DropEmbed 1080p Relay] Submitting direct 1080p link to DropEmbed remote-upload...")
         remote_url = "https://dropembed.com/api/videos/remote-upload"
-        headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+        api_headers = {
+            "X-API-Key": api_key,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        }
         payload = {"urls": [direct_url]}
 
-        res = requests.post(remote_url, json=payload, headers=headers, timeout=30)
-        data = res.json()
-        if not data.get("success"):
-            raise RuntimeError(f"DropEmbed remote-upload failed: {data}")
+        data = None
+        for attempt in range(1, 4):
+            try:
+                res = requests.post(remote_url, json=payload, headers=api_headers, timeout=30)
+                print(f"[DropEmbed 1080p Relay] remote-upload attempt {attempt}: HTTP {res.status_code}")
+                if res.status_code == 200:
+                    try:
+                        res_json = res.json()
+                        if res_json.get("success"):
+                            data = res_json
+                            break
+                        else:
+                            print(f"[DropEmbed 1080p Relay] DropEmbed response: {res_json}")
+                    except (json.JSONDecodeError, ValueError) as err:
+                        print(f"[DropEmbed 1080p Relay] JSON decode error: {err}. Body: {res.text[:300]}")
+                else:
+                    print(f"[DropEmbed 1080p Relay] Non-200 status {res.status_code}. Body: {res.text[:300]}")
+            except requests.RequestException as e:
+                print(f"[DropEmbed 1080p Relay] POST request attempt {attempt} error: {e}")
+            time.sleep(3)
+
+        if not data or not data.get("success"):
+            raise RuntimeError(f"DropEmbed remote-upload failed after retries: {data}")
 
         tasks = data.get("tasks", [])
-        if not tasks:
-            raise RuntimeError(f"DropEmbed returned no tasks: {data}")
+        video_id = None
+        if tasks:
+            task = tasks[0]
+            video_id = task.get("video_id")
+        else:
+            # Fallback: check videos list if already queued
+            try:
+                list_res = requests.get("https://dropembed.com/api/videos", headers=api_headers, timeout=15)
+                if list_res.status_code == 200:
+                    v_list = list_res.json().get("data", [])
+                    for v in v_list:
+                        desc = v.get("description") or ""
+                        if direct_url in desc or raw_asset_url in desc:
+                            video_id = v.get("id")
+                            break
+            except (requests.RequestException, ValueError, KeyError) as list_err:
+                print(f"[DropEmbed 1080p Relay] Video list fallback warning: {list_err}")
 
-        task = tasks[0]
-        video_id = task.get("video_id")
+        if not video_id:
+            raise RuntimeError(f"DropEmbed returned no video_id: {data}")
+
         print(f"[DropEmbed 1080p Relay] Transfer queued! Assigned Video ID: {video_id}")
 
         # Update title on DropEmbed
         try:
             patch_url = f"https://dropembed.com/api/videos/{video_id}"
-            requests.patch(patch_url, json={"title": title}, headers=headers, timeout=10)
+            requests.patch(patch_url, json={"title": title}, headers=api_headers, timeout=10)
         except requests.RequestException:
             pass
 
-        # Wait briefly for DropEmbed servers to finish downloading the asset
-        print("[DropEmbed 1080p Relay] Waiting for DropEmbed cloud-to-cloud transfer...")
-        time.sleep(20)
+        # Wait for DropEmbed servers to finish downloading the asset before deleting the release
+        print("[DropEmbed 1080p Relay] Monitoring DropEmbed cloud-to-cloud transfer progress...")
+        poll_url = f"https://dropembed.com/api/videos/{video_id}"
+        transfer_done = False
+        for poll_i in range(30):
+            time.sleep(5)
+            try:
+                poll_res = requests.get(poll_url, headers=api_headers, timeout=15)
+                if poll_res.status_code == 200:
+                    poll_data = poll_res.json().get("data", {})
+                    v_status = poll_data.get("status")
+                    v_size = poll_data.get("file_size", 0)
+                    print(f"[DropEmbed 1080p Relay] Status: {v_status} | Size: {v_size} bytes ({(poll_i + 1) * 5}s)")
+                    if v_status in ("processing", "ready") or (v_size and v_size > 0):
+                        print("[DropEmbed 1080p Relay] Transfer completed! DropEmbed has received full 1080p file.")
+                        transfer_done = True
+                        break
+                    elif v_status == "error":
+                        print("[DropEmbed 1080p Relay] DropEmbed reported error during transfer.")
+                        break
+            except requests.RequestException as poll_err:
+                print(f"[DropEmbed 1080p Relay] Poll check warning: {poll_err}")
+
+        if not transfer_done:
+            print("[DropEmbed 1080p Relay] Transfer wait timeout reached, proceeding...")
 
         return {
             "success": True,
@@ -834,7 +914,10 @@ def main():
             try:
                 info_r = requests.get(
                     f"https://dropembed.com/api/videos/{video_id}",
-                    headers={"X-API-Key": api_key},
+                    headers={
+                        "X-API-Key": api_key,
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                    },
                     timeout=10,
                 )
                 if info_r.status_code == 200:

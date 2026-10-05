@@ -287,7 +287,10 @@ def run_auto_watcher(max_new_videos: int = 2, target_user: str = DEFAULT_TARGET_
                 try:
                     info_r = requests.get(
                         f"https://dropembed.com/api/videos/{video_id}",
-                        headers={"X-API-Key": api_key},
+                        headers={
+                            "X-API-Key": api_key,
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                        },
                         timeout=10,
                     )
                     if info_r.status_code == 200:
