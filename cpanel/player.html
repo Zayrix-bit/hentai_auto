@@ -109,9 +109,14 @@
         const coverImg = v.poster_url || v.thumbnail_url || '';
         const genresList = v.genres ? v.genres.split(',').slice(0, 2).map(g => `<span class="bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded text-[10px] font-medium">${escapeHtml(g.trim())}</span>`).join(' ') : '';
         const yearBadge = v.year ? `<span class="text-zinc-400 text-[11px] mono">(${v.year})</span>` : '';
+        const epBadge = v.episode ? `<div class="absolute top-2 left-2 bg-red-600 text-white font-bold text-[10px] px-2 py-0.5 rounded shadow-lg shadow-black/80">EP ${escapeHtml(v.episode)}</div>` : '';
+        const scoreBadge = v.score ? `<span class="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded text-[10px] font-semibold">★ ${v.score}</span>` : '';
+        const malBadge = v.mal_id ? `<a href="https://myanimelist.net/anime/${v.mal_id}" target="_blank" onclick="event.stopPropagation()" class="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 hover:text-blue-300 border border-blue-500/30 px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors">MAL #${v.mal_id} ↗</a>` : '';
+
+        const vData = encodeURIComponent(JSON.stringify(v));
 
         return `
-        <div onclick="playVideo('${encodeURIComponent(v.embed_url)}', '${encodeURIComponent(v.title)}', '${v.file_size_mb || 0} MB', '${v.created_at}', '${encodeURIComponent(v.description || '')}', '${encodeURIComponent(v.genres || '')}')"
+        <div onclick="playVideoFromData('${vData}')"
              class="group cursor-pointer bg-[#121520] hover:bg-[#181c2b] border border-white/[0.08] hover:border-red-500/50 rounded-xl overflow-hidden transition-all duration-300 hover:-translate-y-1.5 shadow-xl shadow-black/50 flex flex-col">
           <div class="relative aspect-[16/10] bg-zinc-950 overflow-hidden flex items-center justify-center">
             ${coverImg ? `
@@ -120,6 +125,7 @@
             ` : `
               <div class="text-zinc-600 font-bold text-xs uppercase tracking-wider">No Cover</div>
             `}
+            ${epBadge}
             <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 backdrop-blur-[2px]">
               <div class="w-12 h-12 rounded-full bg-red-600 text-white flex items-center justify-center pl-1 text-base shadow-lg shadow-red-600/60 scale-90 group-hover:scale-100 transition-transform">
                 ▶
@@ -133,6 +139,8 @@
             <div>
               <div class="flex items-center gap-1.5 mb-1.5 flex-wrap">
                 ${genresList}
+                ${scoreBadge}
+                ${malBadge}
                 ${yearBadge}
               </div>
               <h4 class="font-bold text-sm text-zinc-100 group-hover:text-red-400 transition-colors line-clamp-2 leading-snug">
@@ -141,7 +149,7 @@
             </div>
             <div class="flex items-center justify-between text-[11px] text-zinc-500 mono mt-3 pt-2 border-t border-white/[0.04]">
               <span>${v.created_at ? v.created_at.substring(0, 10) : ''}</span>
-              <span class="text-emerald-400">● Ready</span>
+              <span class="text-emerald-400">● 1080p Stream</span>
             </div>
           </div>
         </div>
@@ -149,22 +157,35 @@
       }).join('');
     }
 
-    function playVideo(embedUrl, title, size, date, desc, genres) {
+    function playVideoFromData(vJson) {
+      const v = JSON.parse(decodeURIComponent(vJson));
       const stage = document.getElementById('playerStage');
       const iframe = document.getElementById('activeIframe');
       const activeTitle = document.getElementById('activeTitle');
       const activeMeta = document.getElementById('activeMeta');
 
-      iframe.src = decodeURIComponent(embedUrl);
-      activeTitle.innerText = decodeURIComponent(title);
-      const decodedDesc = decodeURIComponent(desc);
-      const decodedGenres = decodeURIComponent(genres);
+      iframe.src = v.embed_url || `https://dropembed.com/e/${v.video_id}`;
+      activeTitle.innerText = v.title || 'Untitled';
+
+      const malBtn = v.mal_id ? `
+        <a href="https://myanimelist.net/anime/${v.mal_id}" target="_blank" class="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 border border-blue-500/40 rounded-lg text-xs font-semibold transition-colors">
+          View on MyAnimeList ↗
+        </a>
+      ` : '';
+
+      const epText = v.episode ? `<span class="bg-red-600 text-white font-bold px-2 py-0.5 rounded text-[11px]">Episode ${escapeHtml(v.episode)}</span>` : '';
+      const scoreText = v.score ? `<span class="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded text-[11px] font-semibold">★ ${v.score} / 10</span>` : '';
 
       activeMeta.innerHTML = `
-        <div class="text-zinc-400 text-xs mb-2 mono">
-          <span>Uploaded: ${date}</span> • <span>Size: ${size}</span> ${decodedGenres ? `• <span class="text-red-400">${decodedGenres}</span>` : ''}
+        <div class="flex flex-wrap items-center gap-2 mb-2 mono text-xs text-zinc-400">
+          ${epText}
+          ${scoreText}
+          <span>Size: ${v.file_size_mb || 0} MB</span>
+          <span>Uploaded: ${v.created_at || 'Recent'}</span>
+          ${v.genres ? `• <span class="text-red-400">${escapeHtml(v.genres)}</span>` : ''}
+          ${malBtn}
         </div>
-        ${decodedDesc ? `<p class="text-zinc-300 text-xs leading-relaxed max-w-4xl line-clamp-3 bg-black/30 p-2.5 rounded-lg border border-white/[0.06]">${escapeHtml(decodedDesc)}</p>` : ''}
+        ${v.description ? `<p class="text-zinc-300 text-xs leading-relaxed max-w-4xl line-clamp-3 bg-black/30 p-2.5 rounded-lg border border-white/[0.06] mt-2">${escapeHtml(v.description)}</p>` : ''}
       `;
       stage.classList.remove('hidden');
       stage.scrollIntoView({ behavior: 'smooth' });

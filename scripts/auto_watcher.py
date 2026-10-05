@@ -20,7 +20,9 @@ import requests
 # Import core pipeline methods
 from pipeline import (
     download_with_aria2,
-    fetch_anilist_metadata,
+    extract_episode,
+    extract_source_id,
+    fetch_mal_metadata,
     locate_largest_video,
     notify_cpanel_database,
     resolve_source,
@@ -171,8 +173,8 @@ def run_auto_watcher(max_new_videos: int = 2) -> None:
             if not final_title:
                 final_title = video_file.stem
 
-            # 4. Fetch AniList HD Poster & Synopsis
-            anilist_meta = fetch_anilist_metadata(final_title)
+            # 4. Fetch Official MyAnimeList Metadata (MAL ID, Score, Poster, Synopsis, Genres)
+            mal_meta = fetch_mal_metadata(final_title)
 
             # 5. Stream upload to DropEmbed
             upload_res = upload_to_dropembed(
@@ -186,7 +188,7 @@ def run_auto_watcher(max_new_videos: int = 2) -> None:
             watch_url = upload_res.get("url") or f"https://dropembed.com/v/{video_id}"
 
             thumb_url = animetosho_thumb or ""
-            if not thumb_url and not anilist_meta.get("poster_url") and video_id:
+            if not thumb_url and not mal_meta.get("poster_url") and video_id:
                 try:
                     info_r = requests.get(
                         f"https://dropembed.com/api/videos/{video_id}",
@@ -198,6 +200,9 @@ def run_auto_watcher(max_new_videos: int = 2) -> None:
                 except (requests.RequestException, ValueError, KeyError):
                     pass
 
+            episode = extract_episode(final_title) or extract_episode(video_file.name)
+            source_id = extract_source_id(item["source"])
+
             record = {
                 "title": final_title,
                 "video_id": video_id,
@@ -205,12 +210,18 @@ def run_auto_watcher(max_new_videos: int = 2) -> None:
                 "embed_url": embed_url,
                 "file_name": video_file.name,
                 "file_size_mb": round(video_file.stat().st_size / (1024 * 1024), 2),
-                "poster_url": anilist_meta.get("poster_url") or "",
+                "poster_url": mal_meta.get("poster_url") or "",
                 "thumbnail_url": thumb_url,
-                "banner_url": anilist_meta.get("banner_url") or "",
-                "description": anilist_meta.get("description") or "",
-                "genres": anilist_meta.get("genres") or "",
-                "year": anilist_meta.get("year"),
+                "banner_url": mal_meta.get("banner_url") or "",
+                "description": mal_meta.get("synopsis") or mal_meta.get("description") or "",
+                "genres": mal_meta.get("genres") or "Hentai",
+                "year": mal_meta.get("year"),
+                "mal_id": mal_meta.get("mal_id"),
+                "anilist_id": mal_meta.get("anilist_id"),
+                "source_id": source_id,
+                "episode": episode,
+                "score": mal_meta.get("score"),
+                "mal_url": mal_meta.get("mal_url") or "",
                 "uploaded_at": datetime.now(timezone.utc).isoformat(),
                 "source_input": item["source"],
             }

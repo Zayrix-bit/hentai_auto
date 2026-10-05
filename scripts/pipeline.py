@@ -111,77 +111,247 @@ def resolve_source(source_url: str) -> tuple[str, str, str]:
     return source_url, title_hint, ""
 
 
-def fetch_anilist_metadata(title: str) -> dict:
+def extract_title_candidates(title: str) -> list[str]:
     """
-    Fetches official HD vertical poster, banner, description, and genres from AniList GraphQL API.
+    Extracts high-probability search candidates from torrent/release titles.
+    Handles Japanese/Romaji titles in parentheses and removes release group tags.
     """
-    url = "https://graphql.anilist.co"
-    # Clean release brackets, resolutions, episode numbers for search accuracy
-    clean_title = re.sub(r"\[.*?\]|\(.*?\)", "", title)
-    clean_title = re.sub(
-        r"\b(1080p|720p|480p|HEVC|x264|x265|AAC|Sub|Dub|Batch|OVA|Complete)\b",
-        "",
-        clean_title,
+    candidates = []
+
+    # 1. Check inside parentheses: e.g. (同じゼミの染谷さんがセクシー女優だった話。; Onaji Zemi no Someya-san ga Sexy Joyuu datta Hanashi.)
+    for paren in re.findall(r"\(([^)]+)\)", title):
+        for part in re.split(r"[;；/]", paren):
+            part_clean = re.sub(
+                r"\b(1080p|720p|480p|2160p|4k|HEVC|x264|x265|AAC|AT-X|WEB-DL|UNCENSORED|CENSORED)\b",
+                "",
+                part,
+                flags=re.IGNORECASE,
+            ).strip()
+            if len(part_clean) > 3 and not part_clean.isdigit() and part_clean not in candidates:
+                candidates.append(part_clean)
+
+    # 2. Main title cleaning: strip brackets [Group], [1080p], and parentheses (...)
+    clean = re.sub(r"\[.*?\]|\(.*?\)", " ", title)
+    clean = re.sub(
+        r"\b(1080p|720p|480p|2160p|4k|HEVC|x264|x265|AAC|Sub|Dub|Batch|OVA|Complete|UNCENSORED|CENSORED|WEB-DL)\b",
+        " ",
+        clean,
         flags=re.IGNORECASE,
     )
-    clean_title = re.sub(r"-\s*\d+.*", "", clean_title).strip()
-    if not clean_title:
-        clean_title = title
+    clean = re.sub(r"(?:-|\b)\s*(?:S\d+)?(?:EP?|#)\s*\d+.*", " ", clean, flags=re.IGNORECASE)
+    clean = re.sub(r"-\s*\d+.*", " ", clean)
+    clean = " ".join(clean.split()).strip()
+    if clean and clean not in candidates:
+        candidates.insert(0, clean)
 
-    print(f"[AniList] Searching official anime metadata for: '{clean_title}'...")
+    return candidates
 
-    gql_query = """
-    query ($search: String) {
-      Media (search: $search, type: ANIME) {
-        id
-        title {
-          romaji
-          english
-        }
-        coverImage {
-          extraLarge
-          large
-        }
-        bannerImage
-        description(asHtml: false)
-        genres
-        seasonYear
-      }
-    }
+
+def extract_episode(title: str) -> str:
     """
+    Extracts 2-digit padded episode number from release title.
+    Supports S01E08, EP 08, E08, #08, - 08, etc.
+    """
+    patterns = [
+        r"(?:s\d+e|ep|e|#|\bepisode\b)\s*([0-9]{1,4})(?:v[0-9]+)?\b",
+        r"\s+-\s+([0-9]{1,4})(?:v[0-9]+)?\b",
+        r"\b([0-9]{2,3})\b",
+    ]
+    for pat in patterns:
+        m = re.search(pat, title, re.IGNORECASE)
+        if m:
+            return m.group(1).zfill(2)
+    return ""
+
+
+def extract_source_id(source_url: str) -> str:
+    """
+    Extracts unique identifier from Nyaa/Sukebei, AnimeTosho, or magnet link.
+    """
+    if not source_url:
+        return ""
+    m = re.search(r"/(?:view|download|torrent)/([0-9]+)", source_url)
+    if m:
+        return m.group(1)
+    m = re.search(r"\.(n[0-9]+|d[0-9]+)", source_url)
+    if m:
+        return m.group(1)
+    m = re.search(r"urn:btih:([a-zA-Z0-9]{20,40})", source_url, re.IGNORECASE)
+    if m:
+        return m.group(1).lower()
+    return ""
+
+
+def fetch_mal_metadata(title: str) -> dict:
+    """
+    Fetches official HD poster, score, synopsis, genres, and MAL ID from MyAnimeList
+    (https://myanimelist.net/anime/genre/12/Hentai).
+    Uses MAL prefix search and detail scraping without requiring API keys.
+    """
+    candidates = extract_title_candidates(title)
+    if not candidates:
+        candidates = [title]
+
+    print(f"[MAL] Searching MyAnimeList for: {candidates}")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+    }
+
+    matched_item = None
+    for cand in candidates:
+        query_encoded = urllib.parse.quote(cand)
+        url = f"https://myanimelist.net/search/prefix.json?type=anime&keyword={query_encoded}&v=1"
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+
+            for cat in data.get("categories", []):
+                if cat.get("type") == "anime":
+                    items = cat.get("items", [])
+                    if items:
+                        matched_item = items[0]
+                        print(f"[MAL] Match found for '{cand}': {matched_item.get('name')} (MAL ID: {matched_item.get('id')})")
+                        break
+            if matched_item:
+                break
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, KeyError, ValueError) as e:
+            print(f"[MAL Warning] Prefix search failed for '{cand}': {e}")
+
+    # Fallback to AniList GraphQL if MAL direct search gave no match
+    if not matched_item:
+        print("[MAL] Direct MAL search yielded no match. Trying AniList GraphQL bridge...")
+        try:
+            gql_query = """
+            query ($search: String) {
+              Media (search: $search, type: ANIME, isAdult: true) {
+                id
+                idMal
+                title { romaji english }
+                coverImage { extraLarge large }
+                description(asHtml: false)
+                genres
+                seasonYear
+                episodes
+                meanScore
+              }
+            }
+            """
+            for cand in candidates:
+                res = requests.post(
+                    "https://graphql.anilist.co",
+                    json={"query": gql_query, "variables": {"search": cand}},
+                    timeout=10,
+                )
+                if res.status_code == 200:
+                    med = res.json().get("data", {}).get("Media")
+                    if med:
+                        print(f"[MAL Bridge] Found on AniList: {med.get('title', {}).get('romaji')} (MAL ID: {med.get('idMal')})")
+                        cover = med.get("coverImage") or {}
+                        score_raw = med.get("meanScore")
+                        score_val = round(score_raw / 10.0, 2) if score_raw else None
+                        return {
+                            "mal_id": med.get("idMal"),
+                            "anilist_id": med.get("id"),
+                            "title": med.get("title", {}).get("romaji") or cand,
+                            "score": score_val,
+                            "poster_url": cover.get("extraLarge") or cover.get("large") or "",
+                            "synopsis": med.get("description") or "",
+                            "genres": ", ".join(med.get("genres", [])) if med.get("genres") else "Hentai",
+                            "episodes": med.get("episodes"),
+                            "year": med.get("seasonYear"),
+                            "mal_url": f"https://myanimelist.net/anime/{med.get('idMal')}" if med.get("idMal") else "",
+                        }
+        except (requests.RequestException, KeyError, ValueError) as e:
+            print(f"[MAL Bridge Warning] AniList fallback failed: {e}")
+
+    if not matched_item:
+        print("[MAL] No matches found on MAL.")
+        return {
+            "mal_id": None,
+            "anilist_id": None,
+            "title": "",
+            "score": None,
+            "poster_url": "",
+            "synopsis": "",
+            "genres": "Hentai",
+            "episodes": None,
+            "year": None,
+            "mal_url": "",
+        }
+
+    mal_id = matched_item.get("id")
+    mal_url = matched_item.get("url", f"https://myanimelist.net/anime/{mal_id}")
+    name = matched_item.get("name", "")
+
+    # Extract clean HD image URL by stripping thumbnail scaling parameters (/r/116x180)
+    raw_img = matched_item.get("image_url", "")
+    hd_poster = re.sub(r"/r/\d+x\d+", "", raw_img).split("?")[0] if raw_img else ""
+
+    payload = matched_item.get("payload", {})
+    score_val = payload.get("score")
+    try:
+        score = float(score_val) if score_val else None
+    except ValueError:
+        score = None
+    year = payload.get("start_year")
+
+    synopsis = ""
+    genres = []
+    episodes = None
 
     try:
-        resp = requests.post(
-            url,
-            json={"query": gql_query, "variables": {"search": clean_title}},
-            timeout=12,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            media = data.get("data", {}).get("Media")
-            if media:
-                cover = media.get("coverImage") or {}
-                poster = cover.get("extraLarge") or cover.get("large") or ""
-                genres = ", ".join(media.get("genres", []))
-                print(f"[AniList] Found: {media.get('title', {}).get('romaji')} (Year: {media.get('seasonYear')})")
-                print(f"[AniList] Poster URL: {poster}")
-                return {
-                    "poster_url": poster,
-                    "banner_url": media.get("bannerImage") or "",
-                    "description": media.get("description") or "",
-                    "genres": genres,
-                    "year": media.get("seasonYear"),
-                }
-    except (requests.RequestException, ValueError, KeyError) as e:
-        print(f"[AniList Warning] Metadata lookup error: {e}")
+        page_req = urllib.request.Request(mal_url, headers=headers)
+        with urllib.request.urlopen(page_req, timeout=10) as resp:
+            page_html = resp.read().decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(page_html, "html.parser")
+
+        syn_p = soup.find("p", itemprop="description")
+        if syn_p:
+            synopsis = syn_p.get_text(strip=True)
+
+        for a in soup.find_all("a", href=re.compile(r"/anime/genre/")):
+            g_text = a.get_text(strip=True)
+            if g_text and g_text not in genres:
+                genres.append(g_text)
+
+        for div in soup.find_all("div", class_="spaceit_pad"):
+            text = div.get_text(separator=" ", strip=True)
+            if "Episodes:" in text:
+                m = re.search(r"Episodes:\s*(\d+)", text)
+                if m:
+                    episodes = int(m.group(1))
+
+        img_tag = soup.find("img", itemprop="image")
+        if img_tag:
+            page_img = img_tag.get("data-src") or img_tag.get("src")
+            if page_img and "cdn.myanimelist.net/images/anime/" in page_img:
+                hd_poster = page_img.split("?")[0]
+
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, AttributeError) as e:
+        print(f"[MAL Warning] Page scrape error ({e}), using summary info.")
 
     return {
-        "poster_url": "",
-        "banner_url": "",
-        "description": "",
-        "genres": "",
-        "year": None,
+        "mal_id": mal_id,
+        "anilist_id": None,
+        "title": name,
+        "score": score,
+        "poster_url": hd_poster,
+        "synopsis": synopsis,
+        "genres": ", ".join(genres) if genres else "Hentai",
+        "episodes": episodes,
+        "year": year,
+        "mal_url": mal_url,
     }
+
+
+def fetch_anilist_metadata(title: str) -> dict:
+    """
+    Backwards compatibility alias for fetch_mal_metadata.
+    """
+    return fetch_mal_metadata(title)
 
 
 def download_with_aria2(source: str, download_dir: Path) -> None:
@@ -439,16 +609,18 @@ def save_catalog(record: dict, repo_root: Path) -> None:
     md_lines = [
         "# 🎬 DropEmbed Video Catalog\n",
         f"*Total Videos Uploaded: {len(catalog)}*\n",
-        "| Date | Title | Watch Link | Embed Player Link | Embed Code (`<iframe>`) |",
-        "|---|---|---|---|---|",
+        "| Date | Title | Ep | MAL | Score | Watch Link | Embed Player Link |",
+        "|---|---|---|---|---|---|---|",
     ]
     for v in catalog:
         date_str = v.get("uploaded_at", "")[:10]
         v_title = v.get("title", "").replace("|", "\\|")
+        v_ep = v.get("episode") or "-"
+        v_score = f"⭐ {v['score']}" if v.get("score") else "-"
+        v_mal = f"[MAL #{v['mal_id']}]({v['mal_url']})" if v.get("mal_id") and v.get("mal_url") else (f"MAL #{v['mal_id']}" if v.get("mal_id") else "-")
         v_url = v.get("url", "")
         v_embed = v.get("embed_url", "")
-        v_iframe = f"`<iframe src=\"{v_embed}\" width=\"640\" height=\"360\" frameborder=\"0\" allowfullscreen></iframe>`"
-        md_lines.append(f"| {date_str} | **{v_title}** | [Watch]({v_url}) | [Embed Player]({v_embed}) | {v_iframe} |")
+        md_lines.append(f"| {date_str} | **{v_title}** | {v_ep} | {v_mal} | {v_score} | [Watch]({v_url}) | [Embed Player]({v_embed}) |")
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write("\n".join(md_lines) + "\n")
@@ -515,8 +687,13 @@ def write_github_summary(record: dict) -> None:
     v_embed = record.get("embed_url", "")
     v_size = record.get("file_size_mb", 0)
     v_poster = record.get("poster_url") or record.get("thumbnail_url") or ""
-    v_genres = record.get("genres") or "N/A"
+    v_genres = record.get("genres") or "Hentai"
     v_desc = record.get("description") or ""
+    v_mal_id = record.get("mal_id")
+    v_mal_url = record.get("mal_url") or (f"https://myanimelist.net/anime/{v_mal_id}" if v_mal_id else "")
+    v_score = record.get("score")
+    v_ep = record.get("episode")
+    v_source_id = record.get("source_id")
 
     poster_markdown = f"\n![Poster]({v_poster})\n" if v_poster else ""
 
@@ -529,12 +706,16 @@ def write_github_summary(record: dict) -> None:
 |---|---|
 | **Title** | **{v_title}** |
 | **Video ID** | `{v_id}` |
+| **Episode** | `{v_ep or 'N/A'}` |
+| **MyAnimeList** | {f'[{v_mal_id}]({v_mal_url})' if v_mal_id else 'N/A'} |
+| **Score** | {f'⭐ {v_score} / 10' if v_score else 'N/A'} |
+| **Source ID** | {f'#{v_source_id}' if v_source_id else 'N/A'} |
 | **File Size** | {v_size:.2f} MB |
 | **Genres** | {v_genres} |
 | **Watch URL** | [Open in DropEmbed]({v_url}) |
 | **Embed URL** | [Open Player]({v_embed}) |
 
-{f"> **Synopsis:** {v_desc[:250]}..." if v_desc else ""}
+{f"> **Synopsis:** {v_desc[:280]}..." if v_desc else ""}
 
 #### 📋 Embed Player Code (`<iframe>`)
 ```html
@@ -574,8 +755,8 @@ def main():
         if not final_title:
             final_title = video_file.stem  # Clean filename without extension
 
-        # Step 4: Fetch Official AniList Metadata (HD Poster, Description, Genres)
-        anilist_meta = fetch_anilist_metadata(final_title)
+        # Step 4: Fetch Official MyAnimeList Metadata (MAL ID, Score, Poster, Synopsis, Genres)
+        mal_meta = fetch_mal_metadata(final_title)
 
         # Step 5: Stream Upload to DropEmbed
         upload_res = upload_to_dropembed(
@@ -590,7 +771,7 @@ def main():
         watch_url = upload_res.get("url") or f"https://dropembed.com/v/{video_id}"
 
         thumb_url = animetosho_thumb or ""
-        if not thumb_url and not anilist_meta.get("poster_url") and video_id:
+        if not thumb_url and not mal_meta.get("poster_url") and video_id:
             try:
                 info_r = requests.get(
                     f"https://dropembed.com/api/videos/{video_id}",
@@ -602,6 +783,9 @@ def main():
             except (requests.RequestException, ValueError, KeyError):
                 pass
 
+        episode = extract_episode(final_title) or extract_episode(video_file.name)
+        source_id = extract_source_id(args.source)
+
         record = {
             "title": final_title,
             "video_id": video_id,
@@ -609,12 +793,18 @@ def main():
             "embed_url": embed_url,
             "file_name": video_file.name,
             "file_size_mb": round(video_file.stat().st_size / (1024 * 1024), 2),
-            "poster_url": anilist_meta.get("poster_url") or "",
+            "poster_url": mal_meta.get("poster_url") or "",
             "thumbnail_url": thumb_url,
-            "banner_url": anilist_meta.get("banner_url") or "",
-            "description": anilist_meta.get("description") or "",
-            "genres": anilist_meta.get("genres") or "",
-            "year": anilist_meta.get("year"),
+            "banner_url": mal_meta.get("banner_url") or "",
+            "description": mal_meta.get("synopsis") or mal_meta.get("description") or "",
+            "genres": mal_meta.get("genres") or "Hentai",
+            "year": mal_meta.get("year"),
+            "mal_id": mal_meta.get("mal_id"),
+            "anilist_id": mal_meta.get("anilist_id"),
+            "source_id": source_id,
+            "episode": episode,
+            "score": mal_meta.get("score"),
+            "mal_url": mal_meta.get("mal_url") or "",
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
             "source_input": args.source,
         }

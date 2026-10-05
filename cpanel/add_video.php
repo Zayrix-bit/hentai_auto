@@ -54,6 +54,11 @@ $banner_url    = isset($data['banner_url']) ? $data['banner_url'] : null;
 $description   = isset($data['description']) ? $data['description'] : null;
 $genres        = isset($data['genres']) ? $data['genres'] : null;
 $year          = isset($data['year']) ? intval($data['year']) : null;
+$anilist_id    = isset($data['anilist_id']) ? intval($data['anilist_id']) : null;
+$mal_id        = isset($data['mal_id']) ? intval($data['mal_id']) : null;
+$source_id     = isset($data['source_id']) ? $data['source_id'] : null;
+$episode       = isset($data['episode']) ? $data['episode'] : null;
+$score         = isset($data['score']) ? strval($data['score']) : null;
 
 try {
     // Auto-migrate table if new columns are missing
@@ -64,13 +69,19 @@ try {
             ADD COLUMN IF NOT EXISTS `banner_url` VARCHAR(500) NULL,
             ADD COLUMN IF NOT EXISTS `description` TEXT NULL,
             ADD COLUMN IF NOT EXISTS `genres` VARCHAR(255) NULL,
-            ADD COLUMN IF NOT EXISTS `year` INT NULL;");
+            ADD COLUMN IF NOT EXISTS `year` INT NULL,
+            ADD COLUMN IF NOT EXISTS `anilist_id` INT NULL,
+            ADD COLUMN IF NOT EXISTS `mal_id` INT NULL,
+            ADD COLUMN IF NOT EXISTS `source_id` VARCHAR(100) NULL,
+            ADD COLUMN IF NOT EXISTS `episode` VARCHAR(50) NULL,
+            ADD COLUMN IF NOT EXISTS `score` VARCHAR(20) NULL;");
+        $pdo->exec("ALTER TABLE `videos` MODIFY COLUMN `score` VARCHAR(20) NULL;");
     } catch (Exception $e) {}
 
     // Insert or update on duplicate video_id
     $sql = "INSERT INTO `videos` 
-            (`title`, `video_id`, `embed_url`, `watch_url`, `file_name`, `file_size_mb`, `source_input`, `poster_url`, `thumbnail_url`, `banner_url`, `description`, `genres`, `year`) 
-            VALUES (:title, :video_id, :embed_url, :watch_url, :file_name, :file_size_mb, :source_input, :poster_url, :thumbnail_url, :banner_url, :description, :genres, :year)
+            (`title`, `video_id`, `embed_url`, `watch_url`, `file_name`, `file_size_mb`, `source_input`, `poster_url`, `thumbnail_url`, `banner_url`, `description`, `genres`, `year`, `anilist_id`, `mal_id`, `source_id`, `episode`, `score`) 
+            VALUES (:title, :video_id, :embed_url, :watch_url, :file_name, :file_size_mb, :source_input, :poster_url, :thumbnail_url, :banner_url, :description, :genres, :year, :anilist_id, :mal_id, :source_id, :episode, :score)
             ON DUPLICATE KEY UPDATE 
             `title` = VALUES(`title`),
             `embed_url` = VALUES(`embed_url`),
@@ -81,7 +92,12 @@ try {
             `banner_url` = VALUES(`banner_url`),
             `description` = VALUES(`description`),
             `genres` = VALUES(`genres`),
-            `year` = VALUES(`year`);";
+            `year` = VALUES(`year`),
+            `anilist_id` = VALUES(`anilist_id`),
+            `mal_id` = VALUES(`mal_id`),
+            `source_id` = VALUES(`source_id`),
+            `episode` = VALUES(`episode`),
+            `score` = VALUES(`score`);";
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute([
@@ -98,6 +114,11 @@ try {
         ':description'   => $description,
         ':genres'        => $genres,
         ':year'          => $year,
+        ':anilist_id'    => $anilist_id,
+        ':mal_id'        => $mal_id,
+        ':source_id'     => $source_id,
+        ':episode'       => $episode,
+        ':score'         => $score,
     ]);
 
     echo json_encode([
