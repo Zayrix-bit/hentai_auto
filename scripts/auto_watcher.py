@@ -351,7 +351,11 @@ def load_processed_records(repo_root: Path, api_key: str = "") -> dict:
 def is_already_processed(item: dict, processed: dict) -> bool:
     """
     Strict collision and duplicate check.
-    Returns True if the item has already been downloaded or uploaded.
+    Deduplicates strictly by:
+    1. Sukebei unique torrent ID (source_id) or BTIH info hash
+    2. Exact source URLs (torrent URL, magnet link, view URL)
+    3. Exact release title (lowercased)
+    Does NOT collapse distinct releases (e.g. [Dub] vs [Multi-Audio] vs [Uncensored]) that have distinct Sukebei IDs.
     """
     # 1. Check numeric source_id (Sukebei ID or BTIH hash)
     source_id = item.get("source_id") or extract_source_id(item.get("source", "")) or extract_source_id(item.get("guid", "")) or extract_source_id(item.get("torrent", ""))
@@ -367,11 +371,6 @@ def is_already_processed(item: dict, processed: dict) -> bool:
     # 3. Check exact title
     raw_title = item.get("title", "").strip().lower()
     if raw_title and raw_title in processed["raw_titles"]:
-        return True
-
-    # 4. Check normalized title
-    norm_title = normalize_title(item.get("title", ""))
-    if norm_title and norm_title in processed["normalized_titles"]:
         return True
 
     return False
@@ -430,9 +429,8 @@ def run_auto_watcher(
         if is_already_processed(it, processed):
             continue
 
-        sid = it.get("source_id") or extract_source_id(it.get("source", "")) or extract_source_id(it.get("torrent", ""))
-        norm_t = normalize_title(it.get("title", ""))
-        batch_key = sid or norm_t or it.get("title", "").strip().lower()
+        sid = it.get("source_id") or extract_source_id(it.get("source", "")) or extract_source_id(it.get("torrent", "")) or extract_source_id(it.get("guid", ""))
+        batch_key = sid or it.get("title", "").strip().lower()
 
         if batch_key in seen_in_batch:
             continue
