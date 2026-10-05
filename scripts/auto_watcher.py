@@ -377,10 +377,16 @@ def is_already_processed(item: dict, processed: dict) -> bool:
     return False
 
 
-def run_auto_watcher(max_new_videos: int = 85, target_user: str = DEFAULT_TARGET_USER, max_pages: int = 5) -> None:
+def run_auto_watcher(
+    max_new_videos: int = 85,
+    target_user: str = DEFAULT_TARGET_USER,
+    max_pages: int = 5,
+    worker_index: int = 0,
+    total_workers: int = 1,
+) -> None:
     """
     Main loop: Checks target uploader (e.g. Doomdos) and RSS feeds, finds unprocessed items,
-    downloads, uploads, and updates catalogs and database.
+    shards work across parallel workers, downloads, uploads, and updates catalogs and database.
     """
     api_key = os.environ.get("DROPEMBED_API_KEY")
     if not api_key:
@@ -434,15 +440,31 @@ def run_auto_watcher(max_new_videos: int = 85, target_user: str = DEFAULT_TARGET
         new_items.append(it)
 
     print(f"[Auto Watcher] Found {len(new_items)} new unprocessed release(s) out of {len(candidate_items)} total releases.")
-    # Sort by seeders in descending order so fastest, healthiest torrents are processed first
-    new_items.sort(key=lambda x: x.get("seeders", 0), reverse=True)
+    # Deterministic sorting so all parallel workers agree on the exact same list order
+    new_items.sort(key=lambda x: (x.get("seeders", 0), str(x.get("source_id", "")), x.get("title", "")), reverse=True)
+
+    # Shard items across parallel matrix workers
+    if total_workers > 1:
+        sharded = [it for idx, it in enumerate(new_items) if idx % total_workers == worker_index]
+        print(f"[Auto Watcher Matrix] Worker {worker_index + 1}/{total_workers}: assigned {len(sharded)} releases out of {len(new_items)} total.")
+        new_items = sharded
+
     if not new_items:
-        print("[Auto Watcher] Everything is up to date! Zero duplicate overlays. All releases processed.")
+        print(f"[Auto Watcher] Worker {worker_index + 1}/{total_workers}: No pending releases assigned. Everything is up to date!")
+        # Write empty worker output file
+        worker_out_file = repo_root / "data" / f"worker_output_{worker_index}.json"
+        try:
+            (repo_root / "data").mkdir(parents=True, exist_ok=True)
+            with open(worker_out_file, "w", encoding="utf-8") as f:
+                json.dump([], f)
+        except OSError:
+            pass
         return
 
     # Process up to max_new_videos per run
     processed_count = 0
-    download_dir = repo_root / "downloads"
+    worker_records = []
+    download_dir = repo_root / f"downloads_w{worker_index}"
 
     for item in new_items:
         if processed_count >= max_new_videos:
@@ -551,6 +573,8 @@ def run_auto_watcher(max_new_videos: int = 85, target_user: str = DEFAULT_TARGET
                 processed["normalized_titles"].add(norm_final)
             if video_id:
                 processed["video_ids"].add(str(video_id))
+            # 10. Record for parallel matrix artifact merging
+            worker_records.append(record)
 
             processed_count += 1
             print(f"[Auto Watcher] Successfully processed ({processed_count}): {final_title}")
@@ -562,7 +586,18 @@ def run_auto_watcher(max_new_videos: int = 85, target_user: str = DEFAULT_TARGET
             if download_dir.exists():
                 shutil.rmtree(download_dir, ignore_errors=True)
 
-    print(f"\n[Auto Watcher] Finished! Total new videos uploaded: {processed_count}")
+    # Save worker-specific catalog output for aggregation job
+    try:
+        data_dir = repo_root / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        worker_out_file = data_dir / f"worker_output_{worker_index}.json"
+        with open(worker_out_file, "w", encoding="utf-8") as f:
+            json.dump(worker_records, f, indent=2, ensure_ascii=False)
+        print(f"[Auto Watcher Matrix] Worker {worker_index + 1}/{total_workers}: saved {len(worker_records)} records to {worker_out_file.name}")
+    except OSError as e:
+        print(f"[Auto Watcher Matrix Warning] Could not save worker catalog: {e}")
+
+    print(f"\n[Auto Watcher] Worker {worker_index + 1}/{total_workers} Finished! Total new videos uploaded: {processed_count}")
 
 
 if __name__ == "__main__":
@@ -573,9 +608,17 @@ if __name__ == "__main__":
     parser.add_argument("--max-videos", "-n", type=int, default=85, help="Max new videos to process (default: 85)")
     parser.add_argument("--user", "-u", type=str, default=DEFAULT_TARGET_USER, help=f"Target Sukebei/Nyaa uploader (default: {DEFAULT_TARGET_USER})")
     parser.add_argument("--pages", "-p", type=int, default=5, help="Max user profile pages to scrape (default: 5)")
+    parser.add_argument("--worker-index", "-w", type=int, default=0, help="Parallel worker index (0-indexed, default: 0)")
+    parser.add_argument("--total-workers", "-t", type=int, default=1, help="Total parallel matrix workers (default: 1)")
     args = parser.parse_args()
 
     max_vids = args.max_count if args.max_count is not None else args.max_videos
     target_u = os.environ.get("TARGET_UPLOADER", args.user)
 
-    run_auto_watcher(max_new_videos=max_vids, target_user=target_u, max_pages=args.pages)
+    run_auto_watcher(
+        max_new_videos=max_vids,
+        target_user=target_u,
+        max_pages=args.pages,
+        worker_index=args.worker_index,
+        total_workers=args.total_workers,
+    )
