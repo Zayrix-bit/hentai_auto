@@ -523,6 +523,15 @@ def run_auto_watcher(
                     print(f"[Auto Watcher] Episode file '{cur_title}' already uploaded. Skipping duplicate file.")
                     continue
 
+                sep_info = extract_season_episode_part(cur_title)
+                if not sep_info.get("episode"):
+                    sep_info = extract_season_episode_part(video_file.name)
+
+                ep_num = sep_info.get("episode")
+                if ("nightmare campus" in cur_title.lower() or "gedou gakuen" in cur_title.lower()) and ep_num in ("02", "03", "04", "2", "3", "4"):
+                    print(f"[Auto Watcher Anti-Overlay] Nightmare Campus Ep {ep_num} is already uploaded. Skipping redundant file.")
+                    continue
+
                 # 4. Fetch Official MyAnimeList Metadata (MAL ID, Score, Poster, Synopsis, Genres)
                 mal_meta = fetch_mal_metadata(cur_title)
 
@@ -544,10 +553,6 @@ def run_auto_watcher(
                         thumb_url = info_r.get("data", {}).get("thumbnail") or ""
                     except Exception:
                         pass
-
-                sep_info = extract_season_episode_part(cur_title)
-                if not sep_info.get("episode"):
-                    sep_info = extract_season_episode_part(video_file.name)
 
                 source_id = extract_source_id(item["source"]) or item.get("source_id", "")
 

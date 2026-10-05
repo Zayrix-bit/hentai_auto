@@ -27,7 +27,10 @@ KNOWN_FULL_EPISODES = {
     "The Lonely Snow Widow and the Cursed Ring": {"total": 1, "type": "Currently Airing (Fall 2026)", "notes": "Episode 1 released"},
     "Fuzzy Lips": {"total": 2, "type": "OVA", "notes": "Older OVA series"},
     "Sex on the Train with Horny Sluts": {"total": 2, "type": "OVA", "notes": "Episode 2 uploaded"},
-    "Bijukubo": {"total": 2, "type": "OVA", "notes": "Part 2 uploaded"}
+    "Bijukubo": {"total": 2, "type": "OVA", "notes": "Part 2 uploaded"},
+    "Booby Life": {"total": 1, "type": "OVA", "notes": "Single 60-min OVA volume complete (Oppai Life)"},
+    "Muchuu no Tou": {"total": 1, "type": "Currently Airing (Summer/Fall 2026)", "notes": "Episode 1 released"},
+    "KAMUI": {"total": 1, "type": "TV/Shorts", "notes": "Episode 1 Dub released (Ushiro no Shoumen Kamui-san)"}
 }
 
 import re
@@ -38,6 +41,14 @@ def get_base_series(title):
         return "My Classmate's a Sexy Actress, and Now We Live Together"
     if "harem camp" in tl:
         return "Harem Camp"
+    if "furueru kuchibiru" in tl or "fuzzy lips" in tl:
+        return "Fuzzy Lips"
+    if "jashin shoukan" in tl or "sex on the train" in tl:
+        return "Sex on the Train with Horny Sluts"
+    if "bijukubo" in tl:
+        return "Bijukubo"
+    if "nightmare campus" in tl:
+        return "Nightmare Campus"
     
     # Check mappings
     for base in KNOWN_FULL_EPISODES:
@@ -46,15 +57,25 @@ def get_base_series(title):
     return title
 
 def extract_episode_or_part(title, existing_ep):
+    tl = title.lower()
     # Check for "Part One", "Part Two", etc.
     word_map = {"one": "01", "two": "02", "three": "03", "four": "04", "first": "01", "second": "02"}
-    tl = title.lower()
     for w, num in word_map.items():
         if f"part {w}" in tl or f"{w} training" in tl:
             return num
     
-    # Check for "The Bird in a Shell 1", "Nightmare Campus 4", etc.
-    m = re.search(r'(?:the bird in a shell|nightmare campus|stepmother and stepsister)\s+(\d+)', tl)
+    # Check for Nightmare Campus 2, 3, 4
+    m = re.search(r'nightmare campus\s+(\d+)', tl)
+    if m:
+        return f"{int(m.group(1)):02d}"
+
+    # Check for Sex on the Train #02
+    m = re.search(r'#(\d+)', tl)
+    if m:
+        return f"{int(m.group(1)):02d}"
+
+    # Check for "The Bird in a Shell 1", "Stepmother and Stepsister 2"
+    m = re.search(r'(?:the bird in a shell|stepmother and stepsister)\s+(\d+)', tl)
     if m:
         return f"{int(m.group(1)):02d}"
         

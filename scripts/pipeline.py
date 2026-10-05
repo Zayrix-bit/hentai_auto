@@ -439,7 +439,7 @@ def download_with_aria2(source: str, download_dir: Path) -> None:
         tracker_arg = ",".join(PUBLIC_TRACKERS)
         cmd.extend([
             "--seed-time=0",               # Stop seeding immediately once download completes
-            "--bt-stop-timeout=90",        # Timeout if no seeders/traffic for 90s (give peers time to handshake)
+            "--bt-stop-timeout=150",       # Timeout if no seeders/traffic for 150s (give peers time to handshake on DHT)
             f"--bt-tracker={tracker_arg}", # Inject fast DHT public trackers
             "--follow-torrent=mem",
             "--enable-dht=true",
@@ -484,13 +484,13 @@ def download_with_aria2(source: str, download_dir: Path) -> None:
             if "DL:" in line_clean and "DL:0B" not in line_clean:
                 last_progress_time = time.time()
 
-        # Watchdog: terminate if download has made 0 progress for 60s or total 450s exceeded
-        if time.time() - last_progress_time > 60:
-            print("[Aria2c Watchdog] Download stalled (no data received for 60s). Terminating...")
+        # Watchdog: terminate if download has made 0 progress for 150s or total 600s exceeded
+        if time.time() - last_progress_time > 150:
+            print("[Aria2c Watchdog] Download stalled (no data received for 150s). Terminating...")
             process.terminate()
             break
-        if time.time() - start_time > 450:
-            print("[Aria2c Watchdog] Download exceeded 450s maximum threshold. Terminating...")
+        if time.time() - start_time > 600:
+            print("[Aria2c Watchdog] Download exceeded 600s maximum threshold. Terminating...")
             process.terminate()
             break
 
