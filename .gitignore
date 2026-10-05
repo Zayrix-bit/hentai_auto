@@ -1,0 +1,20 @@
+# Temporary download folders
+downloads/
+*.mp4
+*.mkv
+*.avi
+*.webm
+*.mov
+*.ts
+*.torrent
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Environment files
+.env
