@@ -101,35 +101,55 @@
     function renderGrid(videos) {
       const grid = document.getElementById('videoGrid');
       if (videos.length === 0) {
-        grid.innerHTML = `<div class="col-span-full text-center py-16 text-zinc-500">No videos found. Trigger a GitHub Action to add videos!</div>`;
+        grid.innerHTML = `<div class="col-span-full text-center py-16 text-zinc-500">No videos found. Run the automation to add videos!</div>`;
         return;
       }
 
-      grid.innerHTML = videos.map(v => `
-        <div onclick="playVideo('${encodeURIComponent(v.embed_url)}', '${encodeURIComponent(v.title)}', '${v.file_size_mb || 0} MB', '${v.created_at}')"
-             class="group cursor-pointer bg-[#121520] hover:bg-[#181c2b] border border-white/[0.08] hover:border-red-500/40 rounded-xl overflow-hidden transition-all duration-300 hover:-translate-y-1 shadow-lg shadow-black/40">
-          <div class="relative aspect-video bg-zinc-950 flex items-center justify-center overflow-hidden">
-            <div class="w-12 h-12 rounded-full bg-red-600/90 text-white flex items-center justify-center pl-1 text-base group-hover:scale-110 transition-transform shadow-lg shadow-red-600/50">
-              ▶
+      grid.innerHTML = videos.map(v => {
+        const coverImg = v.poster_url || v.thumbnail_url || '';
+        const genresList = v.genres ? v.genres.split(',').slice(0, 2).map(g => `<span class="bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded text-[10px] font-medium">${escapeHtml(g.trim())}</span>`).join(' ') : '';
+        const yearBadge = v.year ? `<span class="text-zinc-400 text-[11px] mono">(${v.year})</span>` : '';
+
+        return `
+        <div onclick="playVideo('${encodeURIComponent(v.embed_url)}', '${encodeURIComponent(v.title)}', '${v.file_size_mb || 0} MB', '${v.created_at}', '${encodeURIComponent(v.description || '')}', '${encodeURIComponent(v.genres || '')}')"
+             class="group cursor-pointer bg-[#121520] hover:bg-[#181c2b] border border-white/[0.08] hover:border-red-500/50 rounded-xl overflow-hidden transition-all duration-300 hover:-translate-y-1.5 shadow-xl shadow-black/50 flex flex-col">
+          <div class="relative aspect-[16/10] bg-zinc-950 overflow-hidden flex items-center justify-center">
+            ${coverImg ? `
+              <img src="${escapeHtml(coverImg)}" alt="${escapeHtml(v.title)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy">
+              <div class="absolute inset-0 bg-gradient-to-t from-[#121520] via-black/20 to-transparent"></div>
+            ` : `
+              <div class="text-zinc-600 font-bold text-xs uppercase tracking-wider">No Cover</div>
+            `}
+            <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 backdrop-blur-[2px]">
+              <div class="w-12 h-12 rounded-full bg-red-600 text-white flex items-center justify-center pl-1 text-base shadow-lg shadow-red-600/60 scale-90 group-hover:scale-100 transition-transform">
+                ▶
+              </div>
             </div>
-            <div class="absolute bottom-2 right-2 bg-black/80 px-2 py-0.5 rounded text-[11px] mono text-zinc-300">
+            <div class="absolute bottom-2 right-2 bg-black/80 backdrop-blur-sm px-2 py-0.5 rounded text-[11px] mono text-zinc-300 border border-white/10">
               ${v.file_size_mb ? v.file_size_mb + ' MB' : 'HD'}
             </div>
           </div>
-          <div class="p-3.5">
-            <h4 class="font-semibold text-sm text-zinc-100 group-hover:text-red-400 transition-colors line-clamp-2 mb-2 leading-snug">
-              ${escapeHtml(v.title)}
-            </h4>
-            <div class="flex items-center justify-between text-[11px] text-zinc-500 mono">
+          <div class="p-3.5 flex-1 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                ${genresList}
+                ${yearBadge}
+              </div>
+              <h4 class="font-bold text-sm text-zinc-100 group-hover:text-red-400 transition-colors line-clamp-2 leading-snug">
+                ${escapeHtml(v.title)}
+              </h4>
+            </div>
+            <div class="flex items-center justify-between text-[11px] text-zinc-500 mono mt-3 pt-2 border-t border-white/[0.04]">
               <span>${v.created_at ? v.created_at.substring(0, 10) : ''}</span>
-              <span class="text-red-400/80">Stream Ready</span>
+              <span class="text-emerald-400">● Ready</span>
             </div>
           </div>
         </div>
-      `).join('');
+      `;
+      }).join('');
     }
 
-    function playVideo(embedUrl, title, size, date) {
+    function playVideo(embedUrl, title, size, date, desc, genres) {
       const stage = document.getElementById('playerStage');
       const iframe = document.getElementById('activeIframe');
       const activeTitle = document.getElementById('activeTitle');
@@ -137,7 +157,15 @@
 
       iframe.src = decodeURIComponent(embedUrl);
       activeTitle.innerText = decodeURIComponent(title);
-      activeMeta.innerText = `Uploaded: ${date} • Size: ${size}`;
+      const decodedDesc = decodeURIComponent(desc);
+      const decodedGenres = decodeURIComponent(genres);
+
+      activeMeta.innerHTML = `
+        <div class="text-zinc-400 text-xs mb-2 mono">
+          <span>Uploaded: ${date}</span> • <span>Size: ${size}</span> ${decodedGenres ? `• <span class="text-red-400">${decodedGenres}</span>` : ''}
+        </div>
+        ${decodedDesc ? `<p class="text-zinc-300 text-xs leading-relaxed max-w-4xl line-clamp-3 bg-black/30 p-2.5 rounded-lg border border-white/[0.06]">${escapeHtml(decodedDesc)}</p>` : ''}
+      `;
       stage.classList.remove('hidden');
       stage.scrollIntoView({ behavior: 'smooth' });
     }

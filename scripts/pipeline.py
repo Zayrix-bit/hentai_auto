@@ -62,22 +62,30 @@ def resolve_source(source_url: str) -> tuple[str, str]:
             if h1:
                 title_hint = h1.get_text(strip=True)
 
+            # Extract AnimeTosho cover image / thumbnail
+            animetosho_thumb = ""
+            for img in soup.find_all('img', src=True):
+                src = img['src']
+                if any(k in src for k in ['/storage/thumb/', '/storage/preview/', 'thumb', 'screenshot']):
+                    animetosho_thumb = urllib.parse.urljoin(source_url, src)
+                    print(f"[Resolver] Found AnimeTosho preview image: {animetosho_thumb}")
+                    break
+
             # Prefer Direct Download Links (DDL) if available on AnimeTosho
-            # DDL links usually have download / storage links
             for a in soup.find_all('a', href=True):
                 href = a['href']
                 text = a.get_text(strip=True).lower()
                 if "download" in text and ("/storage/" in href or "mirror" in href):
                     resolved = urllib.parse.urljoin(source_url, href)
                     print(f"[Resolver] Found AnimeTosho Direct DDL: {resolved}")
-                    return resolved, title_hint
+                    return resolved, title_hint, animetosho_thumb
             
             # If no DDL found, check for magnet link
             for a in soup.find_all('a', href=True):
                 href = a['href']
                 if href.startswith("magnet:?"):
                     print(f"[Resolver] Found AnimeTosho Magnet Link: {href[:60]}...")
-                    return href, title_hint
+                    return href, title_hint, animetosho_thumb
                     
             # Fallback to .torrent link
             for a in soup.find_all('a', href=True):
@@ -85,7 +93,7 @@ def resolve_source(source_url: str) -> tuple[str, str]:
                 if href.endswith(".torrent") or "/storage/torrent/" in href:
                     resolved = urllib.parse.urljoin(source_url, href)
                     print(f"[Resolver] Found AnimeTosho .torrent link: {resolved}")
-                    return resolved, title_hint
+                    return resolved, title_hint, animetosho_thumb
         except Exception as e:
             print(f"[Resolver Warning] Could not scrape AnimeTosho page ({e}), using raw URL")
 
@@ -95,7 +103,71 @@ def resolve_source(source_url: str) -> tuple[str, str]:
         if "dn" in parsed:
             title_hint = parsed["dn"][0]
 
-    return source_url, title_hint
+    return source_url, title_hint, ""
+
+
+def fetch_anilist_metadata(title: str) -> dict:
+    """
+    Fetches official HD vertical poster, banner, description, and genres from AniList GraphQL API.
+    """
+    url = "https://graphql.anilist.co"
+    # Clean release brackets, resolutions, episode numbers for search accuracy
+    clean_title = re.sub(r'\[.*?\]|\(.*?\)', '', title)
+    clean_title = re.sub(r'\b(1080p|720p|480p|HEVC|x264|x265|AAC|Sub|Dub|Batch|OVA|Complete)\b', '', clean_title, flags=re.IGNORECASE)
+    clean_title = re.sub(r'-\s*\d+.*', '', clean_title).strip()
+    if not clean_title:
+        clean_title = title
+
+    print(f"[AniList] Searching official anime metadata for: '{clean_title}'...")
+
+    gql_query = """
+    query ($search: String) {
+      Media (search: $search, type: ANIME) {
+        id
+        title {
+          romaji
+          english
+        }
+        coverImage {
+          extraLarge
+          large
+        }
+        bannerImage
+        description(asHtml: false)
+        genres
+        seasonYear
+      }
+    }
+    """
+
+    try:
+        resp = requests.post(url, json={"query": gql_query, "variables": {"search": clean_title}}, timeout=12)
+        if resp.status_code == 200:
+            data = resp.json()
+            media = data.get("data", {}).get("Media")
+            if media:
+                cover = media.get("coverImage", {}) or {}
+                poster = cover.get("extraLarge") or cover.get("large") or ""
+                genres = ", ".join(media.get("genres", []))
+                print(f"[AniList] Found: {media.get('title', {}).get('romaji')} (Year: {media.get('seasonYear')})")
+                print(f"[AniList] Poster URL: {poster}")
+                return {
+                    "poster_url": poster,
+                    "banner_url": media.get("bannerImage") or "",
+                    "description": media.get("description") or "",
+                    "genres": genres,
+                    "year": media.get("seasonYear")
+                }
+    except Exception as e:
+        print(f"[AniList Warning] Metadata lookup error: {e}")
+
+    return {
+        "poster_url": "",
+        "banner_url": "",
+        "description": "",
+        "genres": "",
+        "year": None
+    }
 
 
 def download_with_aria2(source: str, download_dir: Path) -> None:
@@ -372,7 +444,7 @@ def main():
 
     try:
         # Step 1: Resolve Source Link (AnimeTosho / Magnet / Direct)
-        source, title_hint = resolve_source(args.source)
+        source, title_hint, animetosho_thumb = resolve_source(args.source)
         final_title = args.title or title_hint
 
         # Step 2: Download on Cloud Runner
@@ -383,7 +455,10 @@ def main():
         if not final_title:
             final_title = video_file.stem  # Clean filename without extension
 
-        # Step 4: Stream Upload to DropEmbed
+        # Step 4: Fetch Official AniList Metadata (HD Poster, Description, Genres)
+        anilist_meta = fetch_anilist_metadata(final_title)
+
+        # Step 5: Stream Upload to DropEmbed
         upload_res = upload_to_dropembed(
             video_path=video_file,
             title=final_title,
@@ -402,6 +477,12 @@ def main():
             "embed_url": embed_url,
             "file_name": video_file.name,
             "file_size_mb": round(video_file.stat().st_size / (1024 * 1024), 2),
+            "poster_url": anilist_meta.get("poster_url") or "",
+            "thumbnail_url": animetosho_thumb or "",
+            "banner_url": anilist_meta.get("banner_url") or "",
+            "description": anilist_meta.get("description") or "",
+            "genres": anilist_meta.get("genres") or "",
+            "year": anilist_meta.get("year"),
             "uploaded_at": datetime.utcnow().isoformat() + "Z",
             "source_input": args.source
         }

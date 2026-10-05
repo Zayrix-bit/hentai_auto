@@ -41,34 +41,63 @@ if (!$data || empty($data['video_id']) || empty($data['title'])) {
     exit;
 }
 
-$title        = $data['title'];
-$video_id     = $data['video_id'];
-$embed_url    = isset($data['embed_url']) ? $data['embed_url'] : "https://dropembed.com/e/{$video_id}";
-$watch_url    = isset($data['url']) ? $data['url'] : "https://dropembed.com/v/{video_id}";
-$file_name    = isset($data['file_name']) ? $data['file_name'] : null;
-$file_size_mb = isset($data['file_size_mb']) ? floatval($data['file_size_mb']) : null;
-$source_input = isset($data['source_input']) ? $data['source_input'] : null;
+$title         = $data['title'];
+$video_id      = $data['video_id'];
+$embed_url     = isset($data['embed_url']) ? $data['embed_url'] : "https://dropembed.com/e/{$video_id}";
+$watch_url     = isset($data['url']) ? $data['url'] : "https://dropembed.com/v/{$video_id}";
+$file_name     = isset($data['file_name']) ? $data['file_name'] : null;
+$file_size_mb  = isset($data['file_size_mb']) ? floatval($data['file_size_mb']) : null;
+$source_input  = isset($data['source_input']) ? $data['source_input'] : null;
+$poster_url    = isset($data['poster_url']) ? $data['poster_url'] : null;
+$thumbnail_url = isset($data['thumbnail_url']) ? $data['thumbnail_url'] : null;
+$banner_url    = isset($data['banner_url']) ? $data['banner_url'] : null;
+$description   = isset($data['description']) ? $data['description'] : null;
+$genres        = isset($data['genres']) ? $data['genres'] : null;
+$year          = isset($data['year']) ? intval($data['year']) : null;
 
 try {
+    // Auto-migrate table if new columns are missing
+    try {
+        $pdo->exec("ALTER TABLE `videos` 
+            ADD COLUMN IF NOT EXISTS `poster_url` VARCHAR(500) NULL,
+            ADD COLUMN IF NOT EXISTS `thumbnail_url` VARCHAR(500) NULL,
+            ADD COLUMN IF NOT EXISTS `banner_url` VARCHAR(500) NULL,
+            ADD COLUMN IF NOT EXISTS `description` TEXT NULL,
+            ADD COLUMN IF NOT EXISTS `genres` VARCHAR(255) NULL,
+            ADD COLUMN IF NOT EXISTS `year` INT NULL;");
+    } catch (Exception $e) {}
+
     // Insert or update on duplicate video_id
     $sql = "INSERT INTO `videos` 
-            (`title`, `video_id`, `embed_url`, `watch_url`, `file_name`, `file_size_mb`, `source_input`) 
-            VALUES (:title, :video_id, :embed_url, :watch_url, :file_name, :file_size_mb, :source_input)
+            (`title`, `video_id`, `embed_url`, `watch_url`, `file_name`, `file_size_mb`, `source_input`, `poster_url`, `thumbnail_url`, `banner_url`, `description`, `genres`, `year`) 
+            VALUES (:title, :video_id, :embed_url, :watch_url, :file_name, :file_size_mb, :source_input, :poster_url, :thumbnail_url, :banner_url, :description, :genres, :year)
             ON DUPLICATE KEY UPDATE 
             `title` = VALUES(`title`),
             `embed_url` = VALUES(`embed_url`),
             `watch_url` = VALUES(`watch_url`),
-            `file_size_mb` = VALUES(`file_size_mb`);";
+            `file_size_mb` = VALUES(`file_size_mb`),
+            `poster_url` = VALUES(`poster_url`),
+            `thumbnail_url` = VALUES(`thumbnail_url`),
+            `banner_url` = VALUES(`banner_url`),
+            `description` = VALUES(`description`),
+            `genres` = VALUES(`genres`),
+            `year` = VALUES(`year`);";
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute([
-        ':title'        => $title,
-        ':video_id'     => $video_id,
-        ':embed_url'    => $embed_url,
-        ':watch_url'    => $watch_url,
-        ':file_name'    => $file_name,
-        ':file_size_mb' => $file_size_mb,
-        ':source_input' => $source_input,
+        ':title'         => $title,
+        ':video_id'      => $video_id,
+        ':embed_url'     => $embed_url,
+        ':watch_url'     => $watch_url,
+        ':file_name'     => $file_name,
+        ':file_size_mb'  => $file_size_mb,
+        ':source_input'  => $source_input,
+        ':poster_url'    => $poster_url,
+        ':thumbnail_url' => $thumbnail_url,
+        ':banner_url'    => $banner_url,
+        ':description'   => $description,
+        ':genres'        => $genres,
+        ':year'          => $year,
     ]);
 
     echo json_encode([
