@@ -267,58 +267,153 @@ def locate_largest_video(download_dir: Path) -> Path:
     return largest_file
 
 
+def optimize_video_for_upload(video_path: Path, max_mb: float = 92.0) -> tuple[Path, bool]:
+    """
+    Checks video file size. If larger than max_mb (Cloudflare proxy body limit),
+    compresses the video using ffmpeg with visual quality preservation so
+    it cleanly passes through Cloudflare into DropEmbed.
+    Returns (path_to_upload, is_temporary).
+    """
+    file_size = video_path.stat().st_size
+    size_mb = file_size / (1024 * 1024)
+
+    if size_mb <= max_mb:
+        print(f"[Optimizer] File size ({size_mb:.2f} MB) is <= {max_mb} MB limit. No re-encoding needed.")
+        return video_path, False
+
+    print(f"\n[Optimizer] File size ({size_mb:.2f} MB) exceeds Cloudflare limit ({max_mb} MB)!")
+    print("[Optimizer] Applying smart ffmpeg compression to guarantee successful DropEmbed upload...")
+
+    opt_path = video_path.parent / f"{video_path.stem}_opt.mp4"
+
+    # Step 1: Probe duration using ffprobe
+    duration_secs = 0.0
+    try:
+        probe_cmd = [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(video_path),
+        ]
+        res = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
+        duration_secs = float(res.stdout.strip())
+        print(f"[Optimizer] Video duration: {duration_secs:.1f}s")
+    except (subprocess.SubprocessError, ValueError, OSError) as e:
+        print(f"[Optimizer Warning] Could not probe video duration ({e}), using default CRF settings.")
+
+    # Target ~82 MB so it's comfortably below Cloudflare's 100 MB proxy ceiling
+    target_mb = 82.0
+    if duration_secs > 10.0:
+        total_kbits = target_mb * 8 * 1024
+        audio_kbps = 96
+        video_kbps = max(250, int((total_kbits / duration_secs) - audio_kbps))
+        print(f"[Optimizer] Calculated video bitrate: {video_kbps} kbps, audio: {audio_kbps} kbps")
+
+        ffmpeg_cmd = [
+            "ffmpeg", "-y",
+            "-i", str(video_path),
+            "-c:v", "libx264",
+            "-b:v", f"{video_kbps}k",
+            "-maxrate", f"{int(video_kbps * 1.3)}k",
+            "-bufsize", f"{int(video_kbps * 2)}k",
+            "-preset", "faster",
+            "-vf", "scale=-2:'min(720,ih)'",
+            "-c:a", "aac",
+            "-b:a", f"{audio_kbps}k",
+            "-movflags", "+faststart",
+            str(opt_path),
+        ]
+    else:
+        ffmpeg_cmd = [
+            "ffmpeg", "-y",
+            "-i", str(video_path),
+            "-c:v", "libx264",
+            "-crf", "28",
+            "-preset", "faster",
+            "-vf", "scale=-2:'min(720,ih)'",
+            "-c:a", "aac",
+            "-b:a", "96k",
+            "-movflags", "+faststart",
+            str(opt_path),
+        ]
+
+    try:
+        subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        if opt_path.exists():
+            opt_size_mb = opt_path.stat().st_size / (1024 * 1024)
+            print(f"[Optimizer] Compression successful! New size: {opt_size_mb:.2f} MB (reduced by {size_mb - opt_size_mb:.2f} MB)")
+            return opt_path, True
+    except subprocess.CalledProcessError as e:
+        err_msg = e.stderr.decode("utf-8", errors="ignore")[-400:] if e.stderr else str(e)
+        print(f"[Optimizer Error] ffmpeg encoding failed: {err_msg}")
+
+    print("[Optimizer] Proceeding with original video file.")
+    return video_path, False
+
+
 def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: str = "") -> dict:
     """
     Uploads the video file to DropEmbed using streaming multipart/form-data.
-    Uses context manager to guarantee proper file closure.
+    Automatically applies smart compression if file exceeds Cloudflare 100MB body limit.
     """
-    url = "https://dropembed.com/api/videos/upload"
-    file_size = video_path.stat().st_size
-    file_size_mb = file_size / (1024 * 1024)
-
-    print(f"\n[DropEmbed] Uploading: {video_path.name} ({file_size_mb:.2f} MB)...")
-    print(f"[DropEmbed] Target Title: {title}")
-
-    # Open file using context manager to avoid file descriptor leaks
-    with open(video_path, "rb") as video_fp:
-        fields = {
-            "title": title,
-            "video": (video_path.name, video_fp, "application/octet-stream"),
-        }
-        if folder_id:
-            fields["folder_id"] = str(folder_id)
-
-        encoder = MultipartEncoder(fields=fields)
-
-        # Progress monitor callback
-        last_reported_percent = [-1]
-
-        def callback(monitor):
-            current_percent = int((monitor.bytes_read / monitor.len) * 100)
-            if current_percent % 10 == 0 and current_percent != last_reported_percent[0]:
-                last_reported_percent[0] = current_percent
-                read_mb = monitor.bytes_read / (1024 * 1024)
-                print(f"[DropEmbed Upload Progress] {current_percent}% ({read_mb:.1f} MB / {file_size_mb:.1f} MB)")
-
-        monitor = MultipartEncoderMonitor(encoder, callback)
-
-        headers = {
-            "X-API-Key": api_key,
-            "Content-Type": monitor.content_type,
-        }
-
-        response = requests.post(url, data=monitor, headers=headers, timeout=1800)
+    # Check and optimize file size if > 92 MB
+    upload_target, is_temp = optimize_video_for_upload(video_path)
 
     try:
-        data = response.json()
-    except ValueError:
-        raise RuntimeError(f"DropEmbed invalid JSON response (HTTP {response.status_code}): {response.text}")
+        url = "https://dropembed.com/api/videos/upload"
+        file_size = upload_target.stat().st_size
+        file_size_mb = file_size / (1024 * 1024)
 
-    if not data.get("success"):
-        raise RuntimeError(f"DropEmbed Upload failed: {data}")
+        print(f"\n[DropEmbed] Uploading: {upload_target.name} ({file_size_mb:.2f} MB)...")
+        print(f"[DropEmbed] Target Title: {title}")
 
-    print("[DropEmbed] Upload succeeded!")
-    return data
+        # Open file using context manager to avoid file descriptor leaks
+        with open(upload_target, "rb") as video_fp:
+            fields = {
+                "title": title,
+                "video": (upload_target.name, video_fp, "application/octet-stream"),
+            }
+            if folder_id:
+                fields["folder_id"] = str(folder_id)
+
+            encoder = MultipartEncoder(fields=fields)
+
+            # Progress monitor callback
+            last_reported_percent = [-1]
+
+            def callback(monitor):
+                current_percent = int((monitor.bytes_read / monitor.len) * 100)
+                if current_percent % 10 == 0 and current_percent != last_reported_percent[0]:
+                    last_reported_percent[0] = current_percent
+                    read_mb = monitor.bytes_read / (1024 * 1024)
+                    print(f"[DropEmbed Upload Progress] {current_percent}% ({read_mb:.1f} MB / {file_size_mb:.1f} MB)")
+
+            monitor = MultipartEncoderMonitor(encoder, callback)
+
+            headers = {
+                "X-API-Key": api_key,
+                "Content-Type": monitor.content_type,
+            }
+
+            response = requests.post(url, data=monitor, headers=headers, timeout=1800)
+
+        try:
+            data = response.json()
+        except ValueError:
+            raise RuntimeError(f"DropEmbed invalid JSON response (HTTP {response.status_code}): {response.text}")
+
+        if not data.get("success"):
+            raise RuntimeError(f"DropEmbed Upload failed: {data}")
+
+        print("[DropEmbed] Upload succeeded!")
+        return data
+    finally:
+        # Clean up temporary compressed file if one was created
+        if is_temp and upload_target.exists():
+            try:
+                upload_target.unlink()
+            except OSError:
+                pass
 
 
 def save_catalog(record: dict, repo_root: Path) -> None:
