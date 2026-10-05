@@ -7,6 +7,7 @@ checks against existing database, and automatically downloads and streams to Dro
 
 import json
 import os
+import re
 import shutil
 import sys
 import urllib.error
@@ -17,6 +18,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from bs4 import BeautifulSoup
+
+# Ensure scripts directory is in sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # Import core pipeline methods
 from pipeline import (
@@ -92,27 +96,106 @@ def fetch_feed_items(feed_url: str, max_items: int = 15) -> list[dict]:
     return items
 
 
-def fetch_sukebei_user_items(username: str = DEFAULT_TARGET_USER, max_pages: int = 3) -> list[dict]:
+def normalize_title(title: str) -> str:
+    """
+    Standardizes a release title for collision and duplicate detection.
+    Strips bracketed metadata [tag], (tag), video resolutions, audio tags, and punctuation.
+    """
+    if not title:
+        return ""
+    t = re.sub(r"\[.*?\]", " ", title)
+    t = re.sub(r"\(.*?\)", " ", t)
+    t = re.sub(
+        r"\b(1080p|720p|480p|uncensored|censored|web-dl|bdrip|dvdrip|aac|h264|x264|h265|x265|hevc|avc|multi-audio|multi-sub|dub|sub|dual-audio|raw)\b",
+        " ",
+        t,
+        flags=re.IGNORECASE,
+    )
+    t = re.sub(r"[^a-zA-Z0-9]+", " ", t).strip().lower()
+    return re.sub(r"\s+", " ", t)
+
+
+def fetch_dropembed_remote_catalog(api_key: str) -> dict:
+    """
+    Queries live DropEmbed API (https://upload.dropembed.com/api/videos)
+    to fetch all currently uploaded videos for zero-duplicate enforcement.
+    Returns: {"titles": set(), "norm_titles": set(), "video_ids": set()}
+    """
+    remote_data = {
+        "titles": set(),
+        "norm_titles": set(),
+        "video_ids": set(),
+    }
+    if not api_key:
+        return remote_data
+
+    page = 1
+    max_pages = 10
+    total_found = 0
+
+    while page <= max_pages:
+        url = f"https://upload.dropembed.com/api/videos?page={page}&limit=100"
+        try:
+            res = dropembed_api_request("GET", url, api_key, timeout=15)
+            raw_data = res.get("data", [])
+            items = []
+            if isinstance(raw_data, list):
+                items = raw_data
+            elif isinstance(raw_data, dict):
+                items = raw_data.get("videos") or raw_data.get("items") or raw_data.get("data") or []
+
+            if not items:
+                break
+
+            for v in items:
+                v_title = v.get("title") or ""
+                if v_title:
+                    remote_data["titles"].add(v_title.strip().lower())
+                    norm = normalize_title(v_title)
+                    if norm:
+                        remote_data["norm_titles"].add(norm)
+                v_id = v.get("id") or v.get("video_id")
+                if v_id:
+                    remote_data["video_ids"].add(str(v_id))
+
+            total_found += len(items)
+            if len(items) < 100:
+                break
+            page += 1
+        except Exception as e:  # noqa: BLE001
+            print(f"[Auto Watcher] Notice: Remote DropEmbed catalog sync check ({e}). Continuing with local catalog.")
+            break
+
+    if total_found > 0:
+        print(f"[Auto Watcher] Successfully synced {total_found} live videos directly from DropEmbed account.")
+    return remote_data
+
+
+def fetch_sukebei_user_items(username: str = DEFAULT_TARGET_USER, max_pages: int = 5) -> list[dict]:
     """
     Scrapes user uploads from Sukebei Nyaa (e.g. https://sukebei.nyaa.si/user/Doomdos).
-    Supports both RSS feed and multi-page HTML parsing for comprehensive coverage.
+    Collects from both official RSS feed and multi-page HTML parsing to gather all releases.
+    Merges items cleanly by Sukebei ID/title with seeders count.
     """
-    items = []
-    seen_sources = set()
+    items_by_key = {}
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
     # 1. Try official user RSS feed first (fastest)
     rss_url = f"https://sukebei.nyaa.si/?page=rss&u={urllib.parse.quote(username)}"
-    rss_items = fetch_feed_items(rss_url, max_items=50)
+    rss_items = fetch_feed_items(rss_url, max_items=100)
     for it in rss_items:
-        if it["source"] not in seen_sources:
-            seen_sources.add(it["source"])
-            it["uploader"] = username
-            items.append(it)
+        it["uploader"] = username
+        sid = extract_source_id(it.get("source", "")) or extract_source_id(it.get("guid", ""))
+        norm = normalize_title(it.get("title", ""))
+        key = sid or norm or it.get("title", "").strip().lower()
+        if key:
+            it["source_id"] = sid
+            it["seeders"] = it.get("seeders", 1)  # Default seeders for RSS
+            items_by_key[key] = it
 
-    print(f"[Auto Watcher] Fetched {len(items)} items from {username} RSS feed.")
+    print(f"[Auto Watcher] Fetched {len(items_by_key)} items from {username} RSS feed.")
 
     # 2. Scrape HTML user pages (for full catalogue / pagination)
     for page in range(1, max_pages + 1):
@@ -150,7 +233,6 @@ def fetch_sukebei_user_items(username: str = DEFAULT_TARGET_USER, max_pages: int
                     elif href.startswith("magnet:?"):
                         magnet_url = href
 
-                # Parse seeders count to skip dead torrents
                 tds = tr.find_all("td")
                 seeders = 0
                 if len(tds) >= 6:
@@ -159,14 +241,27 @@ def fetch_sukebei_user_items(username: str = DEFAULT_TARGET_USER, max_pages: int
                     except (ValueError, TypeError):
                         seeders = 0
 
-                # Skip dead and slow torrents (< 2 seeders) immediately to prevent timeout slowdowns
-                if len(tds) >= 6 and seeders < 2:
+                source_link = torrent_url or magnet_url or view_url
+                if not (title and source_link):
                     continue
 
-                source_link = torrent_url or magnet_url or view_url
-                if title and source_link and source_link not in seen_sources:
-                    seen_sources.add(source_link)
-                    items.append({
+                sid = extract_source_id(torrent_url) or extract_source_id(view_url) or extract_source_id(source_link)
+                norm = normalize_title(title)
+                key = sid or norm or title.strip().lower()
+
+                if key in items_by_key:
+                    # Upgrade with direct .torrent URL & real seeders
+                    existing = items_by_key[key]
+                    if torrent_url:
+                        existing["torrent"] = torrent_url
+                        existing["source"] = torrent_url  # Prefer .torrent over magnet for faster aria2c start
+                    if magnet_url:
+                        existing["magnet"] = magnet_url
+                    existing["seeders"] = max(existing.get("seeders", 0), seeders)
+                    if sid:
+                        existing["source_id"] = sid
+                else:
+                    items_by_key[key] = {
                         "title": title,
                         "source": source_link,
                         "guid": view_url or source_link,
@@ -174,49 +269,118 @@ def fetch_sukebei_user_items(username: str = DEFAULT_TARGET_USER, max_pages: int
                         "magnet": magnet_url,
                         "uploader": username,
                         "seeders": seeders,
-                    })
+                        "source_id": sid,
+                    }
                     page_found += 1
 
-            print(f"[Auto Watcher] Page {page} found {page_found} new torrents from {username}.")
-            if page_found == 0:
+            print(f"[Auto Watcher] Page {page} processed ({page_found} new releases discovered, total {len(items_by_key)} unique releases so far).")
+            if not rows or (page_found == 0 and page > 2):
                 break
 
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                print(f"[Auto Watcher] Page {page} returned 404. Reached end of catalog.")
+                break
+            print(f"[Auto Watcher Warning] HTTP {e.code} on page {page}: {e}")
+            break
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
             print(f"[Auto Watcher Warning] Could not scrape {username} page {page}: {e}")
             break
 
-    print(f"[Auto Watcher] Total {len(items)} releases collected from provider {username}.")
-    return items
+    all_items = list(items_by_key.values())
+    print(f"[Auto Watcher] Total {len(all_items)} unique releases collected from provider {username}.")
+    return all_items
 
 
-def load_processed_guids(repo_root: Path) -> set:
+def load_processed_records(repo_root: Path, api_key: str = "") -> dict:
     """
-    Loads list of already processed video titles/IDs to prevent duplicate uploads.
+    Loads sets of already processed records to prevent duplicate downloads and uploads.
+    Checks:
+    1. Local videos.json (source_id, video_id, source_input, raw title, normalized title)
+    2. Remote DropEmbed catalog (all live video IDs and titles on DropEmbed account)
     """
-    processed = set()
+    processed = {
+        "source_ids": set(),
+        "video_ids": set(),
+        "source_urls": set(),
+        "raw_titles": set(),
+        "normalized_titles": set(),
+    }
+
+    # 1. Local catalog (data/videos.json)
     json_path = repo_root / "data" / "videos.json"
     if json_path.exists():
         try:
             with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 for item in data:
-                    if "source_input" in item:
-                        processed.add(item["source_input"])
-                    if "title" in item:
-                        processed.add(item["title"].lower())
-                    if "video_id" in item:
-                        processed.add(item["video_id"])
-        except (json.JSONDecodeError, OSError):
-            pass
+                    src_inp = item.get("source_input")
+                    if src_inp:
+                        processed["source_urls"].add(src_inp)
+                        sid = extract_source_id(src_inp)
+                        if sid:
+                            processed["source_ids"].add(str(sid))
+
+                    sid_direct = item.get("source_id")
+                    if sid_direct:
+                        processed["source_ids"].add(str(sid_direct))
+
+                    v_title = item.get("title")
+                    if v_title:
+                        processed["raw_titles"].add(v_title.strip().lower())
+                        norm = normalize_title(v_title)
+                        if norm:
+                            processed["normalized_titles"].add(norm)
+
+                    v_id = item.get("video_id")
+                    if v_id:
+                        processed["video_ids"].add(str(v_id))
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"[Auto Watcher Warning] Could not parse local videos.json: {e}")
+
+    # 2. Remote DropEmbed catalog
+    if api_key:
+        remote = fetch_dropembed_remote_catalog(api_key)
+        processed["raw_titles"].update(remote["titles"])
+        processed["normalized_titles"].update(remote["norm_titles"])
+        processed["video_ids"].update(remote["video_ids"])
 
     return processed
 
 
-def run_auto_watcher(max_new_videos: int = 2, target_user: str = DEFAULT_TARGET_USER, max_pages: int = 3) -> None:
+def is_already_processed(item: dict, processed: dict) -> bool:
+    """
+    Strict collision and duplicate check.
+    Returns True if the item has already been downloaded or uploaded.
+    """
+    # 1. Check numeric source_id (Sukebei ID or BTIH hash)
+    source_id = item.get("source_id") or extract_source_id(item.get("source", "")) or extract_source_id(item.get("guid", "")) or extract_source_id(item.get("torrent", ""))
+    if source_id and str(source_id) in processed["source_ids"]:
+        return True
+
+    # 2. Check source URLs
+    for k in ("source", "torrent", "magnet", "guid"):
+        val = item.get(k)
+        if val and val in processed["source_urls"]:
+            return True
+
+    # 3. Check exact title
+    raw_title = item.get("title", "").strip().lower()
+    if raw_title and raw_title in processed["raw_titles"]:
+        return True
+
+    # 4. Check normalized title
+    norm_title = normalize_title(item.get("title", ""))
+    if norm_title and norm_title in processed["normalized_titles"]:
+        return True
+
+    return False
+
+
+def run_auto_watcher(max_new_videos: int = 85, target_user: str = DEFAULT_TARGET_USER, max_pages: int = 5) -> None:
     """
     Main loop: Checks target uploader (e.g. Doomdos) and RSS feeds, finds unprocessed items,
     downloads, uploads, and updates catalogs and database.
-    Limits to `max_new_videos` per workflow run to stay well within GitHub Actions limits.
     """
     api_key = os.environ.get("DROPEMBED_API_KEY")
     if not api_key:
@@ -224,8 +388,11 @@ def run_auto_watcher(max_new_videos: int = 2, target_user: str = DEFAULT_TARGET_
         sys.exit(1)
 
     repo_root = Path(__file__).resolve().parent.parent
-    processed = load_processed_guids(repo_root)
-    print(f"[Auto Watcher] Loaded {len(processed)} existing catalog records.")
+    processed = load_processed_records(repo_root, api_key=api_key)
+    print(
+        f"[Auto Watcher] Anti-Overlay Index: {len(processed['source_ids'])} source IDs, "
+        f"{len(processed['raw_titles'])} titles, {len(processed['video_ids'])} video IDs active."
+    )
 
     candidate_items = []
 
@@ -249,19 +416,28 @@ def run_auto_watcher(max_new_videos: int = 2, target_user: str = DEFAULT_TARGET_
         print("[Auto Watcher] No feed items found. Exiting.")
         return
 
-    # Filter out already processed
+    # Filter out already processed with strict deduplication
     new_items = []
-    for it in candidate_items:
-        source = it["source"]
-        title_lower = it["title"].lower()
-        if source not in processed and title_lower not in processed:
-            new_items.append(it)
+    seen_in_batch = set()
 
-    print(f"[Auto Watcher] Found {len(new_items)} new unprocessed release(s).")
+    for it in candidate_items:
+        if is_already_processed(it, processed):
+            continue
+
+        sid = it.get("source_id") or extract_source_id(it.get("source", "")) or extract_source_id(it.get("torrent", ""))
+        norm_t = normalize_title(it.get("title", ""))
+        batch_key = sid or norm_t or it.get("title", "").strip().lower()
+
+        if batch_key in seen_in_batch:
+            continue
+        seen_in_batch.add(batch_key)
+        new_items.append(it)
+
+    print(f"[Auto Watcher] Found {len(new_items)} new unprocessed release(s) out of {len(candidate_items)} total releases.")
     # Sort by seeders in descending order so fastest, healthiest torrents are processed first
     new_items.sort(key=lambda x: x.get("seeders", 0), reverse=True)
     if not new_items:
-        print("[Auto Watcher] Everything is up to date! Nothing to process.")
+        print("[Auto Watcher] Everything is up to date! Zero duplicate overlays. All releases processed.")
         return
 
     # Process up to max_new_videos per run
@@ -274,7 +450,8 @@ def run_auto_watcher(max_new_videos: int = 2, target_user: str = DEFAULT_TARGET_
             break
 
         print("\n" + "=" * 50)
-        print(f"▶ Processing Release ({processed_count + 1}/{max_new_videos}): {item['title']}")
+        print(f"▶ Processing Release ({processed_count + 1}/{len(new_items)} remaining, max {max_new_videos}): {item['title']}")
+        print(f"  Seeders: {item.get('seeders', 0)} | Source: {item['source'][:60]}...")
         print("=" * 50)
 
         try:
@@ -317,14 +494,14 @@ def run_auto_watcher(max_new_videos: int = 2, target_user: str = DEFAULT_TARGET_
                 try:
                     info_r = dropembed_api_request("GET", f"https://upload.dropembed.com/api/videos/{video_id}", api_key, timeout=10)
                     thumb_url = info_r.get("data", {}).get("thumbnail") or ""
-                except Exception:  # noqa: BLE001, S110
+                except Exception:
                     pass
 
             sep_info = extract_season_episode_part(final_title)
             if not sep_info.get("episode"):
                 sep_info = extract_season_episode_part(video_file.name)
 
-            source_id = extract_source_id(item["source"])
+            source_id = extract_source_id(item["source"]) or item.get("source_id", "")
 
             record = {
                 "title": final_title,
@@ -360,10 +537,25 @@ def run_auto_watcher(max_new_videos: int = 2, target_user: str = DEFAULT_TARGET_
             # 8. GitHub Actions Summary
             write_github_summary(record)
 
-            processed_count += 1
-            print(f"[Auto Watcher] Successfully processed: {final_title}")
+            # 9. Register in processed sets in-memory
+            if source_id:
+                processed["source_ids"].add(str(source_id))
+            processed["source_urls"].add(item["source"])
+            if item.get("torrent"):
+                processed["source_urls"].add(item["torrent"])
+            if item.get("magnet"):
+                processed["source_urls"].add(item["magnet"])
+            processed["raw_titles"].add(final_title.strip().lower())
+            norm_final = normalize_title(final_title)
+            if norm_final:
+                processed["normalized_titles"].add(norm_final)
+            if video_id:
+                processed["video_ids"].add(str(video_id))
 
-        except Exception as e:  # noqa: BLE001 - protect batch loop from single item failures
+            processed_count += 1
+            print(f"[Auto Watcher] Successfully processed ({processed_count}): {final_title}")
+
+        except Exception as e:
             print(f"[Auto Watcher Error] Failed to process {item['title']}: {e}")
 
         finally:
@@ -378,9 +570,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Automated Sukebei/Nyaa Watcher for DropEmbed Pipeline")
     parser.add_argument("max_count", nargs="?", type=int, default=None, help="Max new videos to process (positional shortcut)")
-    parser.add_argument("--max-videos", "-n", type=int, default=2, help="Max new videos to process (default: 2)")
+    parser.add_argument("--max-videos", "-n", type=int, default=85, help="Max new videos to process (default: 85)")
     parser.add_argument("--user", "-u", type=str, default=DEFAULT_TARGET_USER, help=f"Target Sukebei/Nyaa uploader (default: {DEFAULT_TARGET_USER})")
-    parser.add_argument("--pages", "-p", type=int, default=3, help="Max user profile pages to scrape (default: 3)")
+    parser.add_argument("--pages", "-p", type=int, default=5, help="Max user profile pages to scrape (default: 5)")
     args = parser.parse_args()
 
     max_vids = args.max_count if args.max_count is not None else args.max_videos

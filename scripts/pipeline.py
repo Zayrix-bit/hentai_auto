@@ -453,6 +453,9 @@ def download_with_aria2(source: str, download_dir: Path) -> None:
     cmd.append(source)
 
     print("[Aria2c] Running download command...")
+    start_time = time.time()
+    last_progress_time = time.time()
+
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -473,9 +476,26 @@ def download_with_aria2(source: str, download_dir: Path) -> None:
             or "Peers:" in line_clean
         ):
             print(f"[Aria2c] {line_clean}")
+            # If active download traffic is received, refresh progress timer
+            if "DL:" in line_clean and "DL:0B" not in line_clean:
+                last_progress_time = time.time()
+
+        # Watchdog: terminate if download has made 0 progress for 60s or total 450s exceeded
+        if time.time() - last_progress_time > 60:
+            print("[Aria2c Watchdog] Download stalled (no data received for 60s). Terminating...")
+            process.terminate()
+            break
+        if time.time() - start_time > 450:
+            print("[Aria2c Watchdog] Download exceeded 450s maximum threshold. Terminating...")
+            process.terminate()
+            break
 
     process.stdout.close()
-    return_code = process.wait()
+    try:
+        return_code = process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        return_code = -1
 
     if return_code != 0:
         raise RuntimeError(f"aria2c failed with return code {return_code}")
@@ -822,6 +842,22 @@ def save_catalog(record: dict, repo_root: Path) -> None:
                 catalog = json.load(f)
         except (json.JSONDecodeError, OSError):
             catalog = []
+
+    # Strict anti-duplicate check in catalog
+    rec_vid = record.get("video_id")
+    rec_src = record.get("source_id")
+    rec_title = record.get("title", "").strip().lower()
+
+    for existing in catalog:
+        if rec_vid and existing.get("video_id") == rec_vid:
+            print(f"[Catalog] Video ID {rec_vid} already in catalog. Skipping duplicate.")
+            return
+        if rec_src and existing.get("source_id") and existing.get("source_id") == rec_src:
+            print(f"[Catalog] Source ID {rec_src} already in catalog. Skipping duplicate.")
+            return
+        if rec_title and existing.get("title", "").strip().lower() == rec_title:
+            print(f"[Catalog] Title '{record.get('title')}' already in catalog. Skipping duplicate.")
+            return
 
     # Prepend new video (newest first)
     catalog.insert(0, record)

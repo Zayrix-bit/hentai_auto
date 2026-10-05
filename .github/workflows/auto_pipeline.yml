@@ -13,11 +13,15 @@ on:
       max_videos:
         description: 'Maximum new videos to download and upload in this run'
         required: false
-        default: '10'
+        default: '85'
       max_pages:
         description: 'Maximum catalog pages to scrape from user profile'
         required: false
         default: '5'
+
+concurrency:
+  group: auto-feed-pipeline
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -60,10 +64,11 @@ jobs:
         run: |
           python scripts/auto_watcher.py \
             --user "${{ github.event.inputs.target_user || 'Doomdos' }}" \
-            --max-videos "${{ github.event.inputs.max_videos || '2' }}" \
-            --pages "${{ github.event.inputs.max_pages || '3' }}"
+            --max-videos "${{ github.event.inputs.max_videos || '85' }}" \
+            --pages "${{ github.event.inputs.max_pages || '5' }}"
 
       - name: Commit and Push Updated Video Catalog
+        if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
