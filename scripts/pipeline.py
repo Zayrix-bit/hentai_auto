@@ -870,14 +870,18 @@ def save_catalog(record: dict, repo_root: Path) -> None:
     rec_vid = record.get("video_id")
     rec_src = record.get("source_id")
     rec_title = record.get("title", "").strip().lower()
+    rec_fname = record.get("file_name", "").strip().lower()
 
     for existing in catalog:
         if rec_vid and existing.get("video_id") == rec_vid:
             print(f"[Catalog] Video ID {rec_vid} already in catalog. Skipping duplicate.")
             return
         if rec_src and existing.get("source_id") and existing.get("source_id") == rec_src:
-            print(f"[Catalog] Source ID {rec_src} already in catalog. Skipping duplicate.")
-            return
+            ex_title = existing.get("title", "").strip().lower()
+            ex_fname = existing.get("file_name", "").strip().lower()
+            if (rec_title and ex_title == rec_title) or (rec_fname and ex_fname == rec_fname):
+                print(f"[Catalog] Source ID {rec_src} with title '{record.get('title')}' already in catalog. Skipping duplicate.")
+                return
         if rec_title and existing.get("title", "").strip().lower() == rec_title:
             print(f"[Catalog] Title '{record.get('title')}' already in catalog. Skipping duplicate.")
             return
