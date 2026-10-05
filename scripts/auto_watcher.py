@@ -157,6 +157,8 @@ def fetch_sukebei_user_items(username: str = DEFAULT_TARGET_USER, max_pages: int
                         "title": title,
                         "source": source_link,
                         "guid": view_url or source_link,
+                        "torrent": torrent_url,
+                        "magnet": magnet_url,
                         "uploader": username,
                     })
                     page_found += 1
@@ -250,9 +252,13 @@ def run_auto_watcher(max_new_videos: int = 2, target_user: str = DEFAULT_TARGET_
     processed_count = 0
     download_dir = repo_root / "downloads"
 
-    for item in new_items[:max_new_videos]:
+    for item in new_items:
+        if processed_count >= max_new_videos:
+            print(f"[Auto Watcher] Target quota reached ({processed_count}/{max_new_videos} videos uploaded). Stopping.")
+            break
+
         print("\n" + "=" * 50)
-        print(f"▶ Processing Release: {item['title']}")
+        print(f"▶ Processing Release ({processed_count + 1}/{max_new_videos}): {item['title']}")
         print("=" * 50)
 
         try:
@@ -260,8 +266,16 @@ def run_auto_watcher(max_new_videos: int = 2, target_user: str = DEFAULT_TARGET_
             source, title_hint, animetosho_thumb = resolve_source(item["source"])
             final_title = title_hint or item["title"]
 
-            # 2. Download via aria2
-            download_with_aria2(source, download_dir)
+            # 2. Download via aria2 with fallback to magnet/torrent alternative
+            try:
+                download_with_aria2(source, download_dir)
+            except Exception as dl_err:
+                fallback_src = item.get("magnet") or item.get("torrent")
+                if fallback_src and fallback_src != source:
+                    print(f"[Auto Watcher] Primary download failed ({dl_err}), trying alternative source...")
+                    download_with_aria2(fallback_src, download_dir)
+                else:
+                    raise
 
             # 3. Locate video file
             video_file = locate_largest_video(download_dir)

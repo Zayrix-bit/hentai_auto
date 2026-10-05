@@ -13,11 +13,11 @@ on:
       max_videos:
         description: 'Maximum new videos to download and upload in this run'
         required: false
-        default: '2'
+        default: '10'
       max_pages:
         description: 'Maximum catalog pages to scrape from user profile'
         required: false
-        default: '3'
+        default: '5'
 
 permissions:
   contents: write

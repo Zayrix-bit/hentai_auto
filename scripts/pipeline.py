@@ -425,6 +425,9 @@ def download_with_aria2(source: str, download_dir: Path) -> None:
         "--max-connection-per-server=16",
         "--split=16",
         "--min-split-size=1M",
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "--timeout=30",
+        "--connect-timeout=15",
     ]
 
     if source.startswith("magnet:?") or source.endswith(".torrent"):
@@ -432,7 +435,7 @@ def download_with_aria2(source: str, download_dir: Path) -> None:
         tracker_arg = ",".join(PUBLIC_TRACKERS)
         cmd.extend([
             "--seed-time=0",               # Stop seeding immediately once download completes
-            "--bt-stop-timeout=300",       # Timeout if no seeders for 5 mins
+            "--bt-stop-timeout=60",        # Timeout if no seeders/traffic for 60s (skip dead torrents fast)
             f"--bt-tracker={tracker_arg}", # Inject fast DHT public trackers
             "--follow-torrent=mem",
         ])
