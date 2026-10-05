@@ -382,10 +382,12 @@ def run_auto_watcher(
     max_pages: int = 5,
     worker_index: int = 0,
     total_workers: int = 1,
+    targets_file: str = "",
 ) -> None:
     """
-    Main loop: Checks target uploader (e.g. Doomdos) and RSS feeds, finds unprocessed items,
-    shards work across parallel workers, downloads, uploads, and updates catalogs and database.
+    Main loop: Checks target uploader (e.g. Doomdos) or explicit targets file,
+    finds unprocessed items, shards work across parallel workers, downloads,
+    uploads, and updates catalogs and database.
     """
     api_key = os.environ.get("DROPEMBED_API_KEY")
     if not api_key:
@@ -401,8 +403,20 @@ def run_auto_watcher(
 
     candidate_items = []
 
+    # Priority 0: Explicit targets file if provided (e.g. data/missing_targets.json)
+    if targets_file:
+        tf_path = Path(targets_file)
+        if not tf_path.is_absolute():
+            tf_path = repo_root / tf_path
+        if tf_path.is_file():
+            print(f"[Auto Watcher] Loading explicit candidate releases from {tf_path}...")
+            with open(tf_path, "r", encoding="utf-8") as f:
+                candidate_items.extend(json.load(f))
+        else:
+            print(f"[Auto Watcher Warning] Specified targets file not found: {tf_path}")
+
     # Priority 1: Fetch from target uploader (Doomdos)
-    if target_user:
+    elif target_user:
         print(f"[Auto Watcher] Targeting provider: {target_user}...")
         user_items = fetch_sukebei_user_items(username=target_user, max_pages=max_pages)
         if user_items:
@@ -608,6 +622,7 @@ if __name__ == "__main__":
     parser.add_argument("--pages", "-p", type=int, default=5, help="Max user profile pages to scrape (default: 5)")
     parser.add_argument("--worker-index", "-w", type=int, default=0, help="Parallel worker index (0-indexed, default: 0)")
     parser.add_argument("--total-workers", "-t", type=int, default=1, help="Total parallel matrix workers (default: 1)")
+    parser.add_argument("--targets-file", "-f", type=str, default="", help="Path to JSON file containing explicit candidate releases")
     args = parser.parse_args()
 
     max_vids = args.max_count if args.max_count is not None else args.max_videos
@@ -619,4 +634,5 @@ if __name__ == "__main__":
         max_pages=args.pages,
         worker_index=args.worker_index,
         total_workers=args.total_workers,
+        targets_file=args.targets_file,
     )

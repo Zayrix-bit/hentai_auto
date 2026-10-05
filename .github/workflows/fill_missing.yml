@@ -1,0 +1,126 @@
+name: Fill Missing Episodes Pipeline (10 Parallel Workers)
+
+on:
+  workflow_dispatch:
+    inputs:
+      targets_file:
+        description: 'Path to target missing episodes JSON'
+        required: false
+        default: 'data/missing_targets.json'
+
+concurrency:
+  group: fill-missing-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  auto_upload:
+    name: Worker ${{ matrix.worker.id }}/10
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        worker:
+          - { id: 1, index: 0 }
+          - { id: 2, index: 1 }
+          - { id: 3, index: 2 }
+          - { id: 4, index: 3 }
+          - { id: 5, index: 4 }
+          - { id: 6, index: 5 }
+          - { id: 7, index: 6 }
+          - { id: 8, index: 7 }
+          - { id: 9, index: 8 }
+          - { id: 10, index: 9 }
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install aria2 (Cloud Downloader)
+        timeout-minutes: 3
+        run: |
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout="15" -qq || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends aria2 || sudo apt-get install -y aria2
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r scripts/requirements.txt
+
+      - name: Process Missing Episodes Worker (Sukebei -> MAL -> DropEmbed -> cPanel)
+        env:
+          DROPEMBED_API_KEY: ${{ secrets.DROPEMBED_API_KEY }}
+          CPANEL_API_URL: ${{ secrets.CPANEL_API_URL }}
+          CPANEL_API_SECRET: ${{ secrets.CPANEL_API_SECRET }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python scripts/auto_watcher.py \
+            --targets-file "${{ github.event.inputs.targets_file || 'data/missing_targets.json' }}" \
+            --max-videos 20 \
+            --worker-index ${{ matrix.worker.index }} \
+            --total-workers 10
+
+      - name: Upload Worker Output Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-catalog-${{ matrix.worker.index }}
+          path: data/worker_output_*.json
+          if-no-files-found: ignore
+
+  aggregate_and_commit:
+    name: Merge All Catalogs & Push to Git
+    needs: [auto_upload]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r scripts/requirements.txt
+
+      - name: Download All Worker Catalog Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: worker_artifacts
+          pattern: worker-catalog-*
+          merge-multiple: true
+
+      - name: Merge Worker Catalogs
+        run: |
+          python scripts/merge_catalogs.py worker_artifacts
+
+      - name: Commit and Push Updated Video Catalog
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/videos.json data/videos.md
+          if git diff --staged --quiet; then
+            echo "No changes to catalog."
+          else
+            git commit -m "chore(auto): catalog all filled missing episodes [skip ci]"
+            git pull --rebase
+            git push
+          fi
