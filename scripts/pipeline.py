@@ -290,19 +290,34 @@ def notify_cpanel_database(record: dict) -> None:
 
     headers = {
         "Content-Type": "application/json",
-        "User-Agent": "GitHubActions-DropEmbedPipeline/1.0"
+        "User-Agent": "GitHubActions-DropEmbedPipeline/1.0",
+        "Host": "jeevankart.in"
     }
     if cpanel_secret:
         headers["Authorization"] = f"Bearer {cpanel_secret}"
 
+    synced = False
     try:
         resp = requests.post(cpanel_url, json=record, headers=headers, timeout=15)
         if resp.status_code == 200:
             print(f"[cPanel DB] Successfully synced to cPanel database: {resp.text}")
+            synced = True
         else:
-            print(f"[cPanel DB Warning] Sync failed (HTTP {resp.status_code}): {resp.text}")
+            print(f"[cPanel DB] URL attempt returned HTTP {resp.status_code}. Trying direct server IP fallback...")
     except Exception as e:
-        print(f"[cPanel DB Warning] Could not connect to cPanel API: {e}")
+        print(f"[cPanel DB] URL attempt failed ({e}). Trying direct server IP fallback...")
+
+    # Fallback directly to server IP with Host header if DNS propagation hasn't reached runner
+    if not synced:
+        fallback_url = "http://37.27.232.161/api/add_video.php"
+        try:
+            resp_fallback = requests.post(fallback_url, json=record, headers=headers, timeout=15)
+            if resp_fallback.status_code == 200:
+                print(f"[cPanel DB] Successfully synced via server fallback: {resp_fallback.text}")
+            else:
+                print(f"[cPanel DB Warning] Fallback sync failed (HTTP {resp_fallback.status_code}): {resp_fallback.text}")
+        except Exception as e2:
+            print(f"[cPanel DB Warning] Could not connect via fallback: {e2}")
 
 
 def write_github_summary(record: dict) -> None:
