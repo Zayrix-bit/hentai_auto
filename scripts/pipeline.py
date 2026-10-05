@@ -322,9 +322,18 @@ def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: s
     tag = f"relay-{int(time.time())}"
     repo_env = os.environ.get("GITHUB_REPOSITORY", "Zayrix-bit/hentai_auto")
 
+    # Create a safe ASCII filename without Japanese characters or special symbols
+    ext = video_path.suffix.lower() or ".mp4"
+    clean_relay_path = video_path.parent / f"relay_1080p_{tag}{ext}"
+    try:
+        os.link(video_path, clean_relay_path)
+    except OSError:
+        shutil.copy2(video_path, clean_relay_path)
+
     create_cmd = [
         "gh", "release", "create", tag,
-        str(video_path),
+        str(clean_relay_path),
+        "--target", "main",
         "--title", f"Relay {tag}",
         "--notes", "Temporary relay asset for DropEmbed 1080p transfer",
         "--repo", repo_env,
@@ -334,7 +343,7 @@ def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: s
         subprocess.run(create_cmd, check=True, capture_output=True, text=True)
         print("[DropEmbed 1080p Relay] Temporary release asset created successfully on cloud runner!")
 
-        raw_asset_url = f"https://github.com/{repo_env}/releases/download/{tag}/{video_path.name}"
+        raw_asset_url = f"https://github.com/{repo_env}/releases/download/{tag}/{clean_relay_path.name}"
 
         # Follow redirect to get direct high-speed CDN URL
         r_head = requests.head(raw_asset_url, allow_redirects=True, timeout=15)
@@ -367,7 +376,7 @@ def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: s
 
         # Wait briefly for DropEmbed servers to finish downloading the asset
         print("[DropEmbed 1080p Relay] Waiting for DropEmbed cloud-to-cloud transfer...")
-        time.sleep(15)
+        time.sleep(20)
 
         return {
             "success": True,
@@ -377,7 +386,22 @@ def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: s
             "embed_url": f"https://dropembed.com/e/{video_id}",
         }
 
+    except subprocess.CalledProcessError as e:
+        print(f"[DropEmbed 1080p Relay Error] gh release create failed (exit {e.returncode}):")
+        if e.stdout:
+            print("Stdout:", e.stdout)
+        if e.stderr:
+            print("Stderr:", e.stderr)
+        raise
+
     finally:
+        # Always remove temporary local file
+        if clean_relay_path.exists():
+            try:
+                clean_relay_path.unlink()
+            except OSError:
+                pass
+
         # Always delete the temporary release to keep repository clean
         del_cmd = ["gh", "release", "delete", tag, "-y", "--repo", repo_env]
         try:
