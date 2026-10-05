@@ -4,10 +4,10 @@
  * Update these credentials with your cPanel MySQL details!
  */
 
-$db_host = 'localhost';          // Usually 'localhost' on cPanel
-$db_name = 'jeevanka_videos';    // e.g. jeevanka_videos
-$db_user = 'jeevanka_dbuser';    // e.g. jeevanka_dbuser
-$db_pass = 'YOUR_DB_PASSWORD';   // Password you created in cPanel
+$db_host = 'localhost';              // Usually 'localhost' on cPanel
+$db_name = 'jeevanka_hentai2_video'; // Aapka exact DB Name
+$db_user = 'jeevanka_dbuser';        // Aapka exact DB User
+$db_pass = 'YOUR_DB_PASSWORD';       // Jo password aapne create kiya tha
 
 // API Secret Key to protect add_video.php from unauthorized requests
 // You can set any secure random string here, and set the same in GitHub Secrets (CPANEL_API_SECRET)
