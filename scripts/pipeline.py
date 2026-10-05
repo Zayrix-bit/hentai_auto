@@ -4,20 +4,24 @@ Cloud Pipeline: Torrent/AnimeTosho -> DropEmbed Uploader
 Zero local bandwidth required - runs on GitHub Actions cloud runner.
 """
 
-import os
-import sys
-import re
-import json
-import shutil
 import argparse
+import json
+import os
+import re
+import shutil
 import subprocess
-from datetime import datetime
-from pathlib import Path
+import sys
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
 import requests
-from requests_toolbelt.multipart.encoder import MultipartEncoder, MultipartEncoderMonitor
 from bs4 import BeautifulSoup
+from requests_toolbelt.multipart.encoder import (
+    MultipartEncoder,
+    MultipartEncoderMonitor,
+)
 
 # Supported video file extensions
 VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.webm', '.mov', '.ts', '.m4v', '.flv'}
@@ -30,16 +34,16 @@ PUBLIC_TRACKERS = [
     "http://tracker.openbittorrent.com:80/announce",
     "udp://explodie.org:6969/announce",
     "udp://9.rarbg.to:2920/announce",
-    "udp://tracker.torrent.eu.org:451/announce"
+    "udp://tracker.torrent.eu.org:451/announce",
 ]
 
 
-def resolve_source(source_url: str) -> tuple[str, str]:
+def resolve_source(source_url: str) -> tuple[str, str, str]:
     """
     Resolves source URLs:
-    - If AnimeTosho link, scrapes page for direct DDL or magnet link.
+    - If AnimeTosho link, scrapes page for direct DDL, magnet link, and preview thumbnail.
     - If magnet link or direct URL, passes through.
-    Returns: (download_url_or_magnet, resolved_title)
+    Returns: (download_url_or_magnet, resolved_title, animetosho_thumbnail_url)
     """
     source_url = source_url.strip()
     title_hint = ""
@@ -50,51 +54,51 @@ def resolve_source(source_url: str) -> tuple[str, str]:
         try:
             req = urllib.request.Request(
                 source_url,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
             )
             with urllib.request.urlopen(req, timeout=15) as resp:
-                html = resp.read().decode('utf-8', errors='ignore')
-            
-            soup = BeautifulSoup(html, 'html.parser')
-            
+                html = resp.read().decode("utf-8", errors="ignore")
+
+            soup = BeautifulSoup(html, "html.parser")
+
             # Extract page title
-            h1 = soup.find('h1')
+            h1 = soup.find("h1")
             if h1:
                 title_hint = h1.get_text(strip=True)
 
             # Extract AnimeTosho cover image / thumbnail
             animetosho_thumb = ""
-            for img in soup.find_all('img', src=True):
-                src = img['src']
-                if any(k in src for k in ['/storage/thumb/', '/storage/preview/', 'thumb', 'screenshot']):
+            for img in soup.find_all("img", src=True):
+                src = img["src"]
+                if any(k in src for k in ["/storage/thumb/", "/storage/preview/", "thumb", "screenshot"]):
                     animetosho_thumb = urllib.parse.urljoin(source_url, src)
                     print(f"[Resolver] Found AnimeTosho preview image: {animetosho_thumb}")
                     break
 
             # Prefer Direct Download Links (DDL) if available on AnimeTosho
-            for a in soup.find_all('a', href=True):
-                href = a['href']
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
                 text = a.get_text(strip=True).lower()
                 if "download" in text and ("/storage/" in href or "mirror" in href):
                     resolved = urllib.parse.urljoin(source_url, href)
                     print(f"[Resolver] Found AnimeTosho Direct DDL: {resolved}")
                     return resolved, title_hint, animetosho_thumb
-            
+
             # If no DDL found, check for magnet link
-            for a in soup.find_all('a', href=True):
-                href = a['href']
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
                 if href.startswith("magnet:?"):
                     print(f"[Resolver] Found AnimeTosho Magnet Link: {href[:60]}...")
                     return href, title_hint, animetosho_thumb
-                    
+
             # Fallback to .torrent link
-            for a in soup.find_all('a', href=True):
-                href = a['href']
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
                 if href.endswith(".torrent") or "/storage/torrent/" in href:
                     resolved = urllib.parse.urljoin(source_url, href)
                     print(f"[Resolver] Found AnimeTosho .torrent link: {resolved}")
                     return resolved, title_hint, animetosho_thumb
-        except Exception as e:
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
             print(f"[Resolver Warning] Could not scrape AnimeTosho page ({e}), using raw URL")
 
     # If it's a magnet link with a display name (&dn=)
@@ -112,9 +116,14 @@ def fetch_anilist_metadata(title: str) -> dict:
     """
     url = "https://graphql.anilist.co"
     # Clean release brackets, resolutions, episode numbers for search accuracy
-    clean_title = re.sub(r'\[.*?\]|\(.*?\)', '', title)
-    clean_title = re.sub(r'\b(1080p|720p|480p|HEVC|x264|x265|AAC|Sub|Dub|Batch|OVA|Complete)\b', '', clean_title, flags=re.IGNORECASE)
-    clean_title = re.sub(r'-\s*\d+.*', '', clean_title).strip()
+    clean_title = re.sub(r"\[.*?\]|\(.*?\)", "", title)
+    clean_title = re.sub(
+        r"\b(1080p|720p|480p|HEVC|x264|x265|AAC|Sub|Dub|Batch|OVA|Complete)\b",
+        "",
+        clean_title,
+        flags=re.IGNORECASE,
+    )
+    clean_title = re.sub(r"-\s*\d+.*", "", clean_title).strip()
     if not clean_title:
         clean_title = title
 
@@ -141,12 +150,16 @@ def fetch_anilist_metadata(title: str) -> dict:
     """
 
     try:
-        resp = requests.post(url, json={"query": gql_query, "variables": {"search": clean_title}}, timeout=12)
+        resp = requests.post(
+            url,
+            json={"query": gql_query, "variables": {"search": clean_title}},
+            timeout=12,
+        )
         if resp.status_code == 200:
             data = resp.json()
             media = data.get("data", {}).get("Media")
             if media:
-                cover = media.get("coverImage", {}) or {}
+                cover = media.get("coverImage") or {}
                 poster = cover.get("extraLarge") or cover.get("large") or ""
                 genres = ", ".join(media.get("genres", []))
                 print(f"[AniList] Found: {media.get('title', {}).get('romaji')} (Year: {media.get('seasonYear')})")
@@ -156,9 +169,9 @@ def fetch_anilist_metadata(title: str) -> dict:
                     "banner_url": media.get("bannerImage") or "",
                     "description": media.get("description") or "",
                     "genres": genres,
-                    "year": media.get("seasonYear")
+                    "year": media.get("seasonYear"),
                 }
-    except Exception as e:
+    except (requests.RequestException, ValueError, KeyError) as e:
         print(f"[AniList Warning] Metadata lookup error: {e}")
 
     return {
@@ -166,7 +179,7 @@ def fetch_anilist_metadata(title: str) -> dict:
         "banner_url": "",
         "description": "",
         "genres": "",
-        "year": None
+        "year": None,
     }
 
 
@@ -175,7 +188,7 @@ def download_with_aria2(source: str, download_dir: Path) -> None:
     Downloads the file or torrent using aria2c with optimized cloud bandwidth flags.
     """
     download_dir.mkdir(parents=True, exist_ok=True)
-    
+
     cmd = [
         "aria2c",
         f"--dir={download_dir.resolve()}",
@@ -201,25 +214,27 @@ def download_with_aria2(source: str, download_dir: Path) -> None:
 
     cmd.append(source)
 
-    print(f"[Aria2c] Running download command...")
+    print("[Aria2c] Running download command...")
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        bufsize=1
+        bufsize=1,
     )
 
-    for line in iter(process.stdout.readline, ''):
+    for line in iter(process.stdout.readline, ""):
         line_clean = line.strip()
-        if line_clean:
-            # Print progress cleanly
-            if line_clean.startswith("[#") or "Download Results:" in line_clean:
-                print(f"[Aria2c] {line_clean}")
-            elif "ETA:" in line_clean or "Speed:" in line_clean or "DL:" in line_clean:
-                print(f"[Aria2c] {line_clean}")
-            elif "Seeds:" in line_clean or "Peers:" in line_clean:
-                print(f"[Aria2c] {line_clean}")
+        if line_clean and (
+            line_clean.startswith("[#")
+            or "Download Results:" in line_clean
+            or "ETA:" in line_clean
+            or "Speed:" in line_clean
+            or "DL:" in line_clean
+            or "Seeds:" in line_clean
+            or "Peers:" in line_clean
+        ):
+            print(f"[Aria2c] {line_clean}")
 
     process.stdout.close()
     return_code = process.wait()
@@ -255,6 +270,7 @@ def locate_largest_video(download_dir: Path) -> Path:
 def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: str = "") -> dict:
     """
     Uploads the video file to DropEmbed using streaming multipart/form-data.
+    Uses context manager to guarantee proper file closure.
     """
     url = "https://dropembed.com/api/videos/upload"
     file_size = video_path.stat().st_size
@@ -263,43 +279,45 @@ def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: s
     print(f"\n[DropEmbed] Uploading: {video_path.name} ({file_size_mb:.2f} MB)...")
     print(f"[DropEmbed] Target Title: {title}")
 
-    # Prepare multipart form fields
-    fields = {
-        'title': title,
-        'video': (video_path.name, open(video_path, 'rb'), 'application/octet-stream')
-    }
-    if folder_id:
-        fields['folder_id'] = str(folder_id)
+    # Open file using context manager to avoid file descriptor leaks
+    with open(video_path, "rb") as video_fp:
+        fields = {
+            "title": title,
+            "video": (video_path.name, video_fp, "application/octet-stream"),
+        }
+        if folder_id:
+            fields["folder_id"] = str(folder_id)
 
-    encoder = MultipartEncoder(fields=fields)
+        encoder = MultipartEncoder(fields=fields)
 
-    # Progress monitor callback
-    last_reported_percent = [-1]
-    def callback(monitor):
-        current_percent = int((monitor.bytes_read / monitor.len) * 100)
-        if current_percent % 10 == 0 and current_percent != last_reported_percent[0]:
-            last_reported_percent[0] = current_percent
-            read_mb = monitor.bytes_read / (1024 * 1024)
-            print(f"[DropEmbed Upload Progress] {current_percent}% ({read_mb:.1f} MB / {file_size_mb:.1f} MB)")
+        # Progress monitor callback
+        last_reported_percent = [-1]
 
-    monitor = MultipartEncoderMonitor(encoder, callback)
+        def callback(monitor):
+            current_percent = int((monitor.bytes_read / monitor.len) * 100)
+            if current_percent % 10 == 0 and current_percent != last_reported_percent[0]:
+                last_reported_percent[0] = current_percent
+                read_mb = monitor.bytes_read / (1024 * 1024)
+                print(f"[DropEmbed Upload Progress] {current_percent}% ({read_mb:.1f} MB / {file_size_mb:.1f} MB)")
 
-    headers = {
-        'X-API-Key': api_key,
-        'Content-Type': monitor.content_type
-    }
+        monitor = MultipartEncoderMonitor(encoder, callback)
 
-    response = requests.post(url, data=monitor, headers=headers, timeout=1800)
+        headers = {
+            "X-API-Key": api_key,
+            "Content-Type": monitor.content_type,
+        }
+
+        response = requests.post(url, data=monitor, headers=headers, timeout=1800)
 
     try:
         data = response.json()
-    except Exception:
-        raise RuntimeError(f"DropEmbed invalid response (HTTP {response.status_code}): {response.text}")
+    except ValueError:
+        raise RuntimeError(f"DropEmbed invalid JSON response (HTTP {response.status_code}): {response.text}")
 
     if not data.get("success"):
         raise RuntimeError(f"DropEmbed Upload failed: {data}")
 
-    print(f"[DropEmbed] Upload succeeded!")
+    print("[DropEmbed] Upload succeeded!")
     return data
 
 
@@ -309,20 +327,20 @@ def save_catalog(record: dict, repo_root: Path) -> None:
     """
     data_dir = repo_root / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
-    
+
     json_path = data_dir / "videos.json"
     catalog = []
     if json_path.exists():
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
+            with open(json_path, "r", encoding="utf-8") as f:
                 catalog = json.load(f)
-        except Exception:
+        except (json.JSONDecodeError, OSError):
             catalog = []
 
     # Prepend new video (newest first)
     catalog.insert(0, record)
 
-    with open(json_path, 'w', encoding='utf-8') as f:
+    with open(json_path, "w", encoding="utf-8") as f:
         json.dump(catalog, f, indent=2, ensure_ascii=False)
     print(f"[Catalog] Saved record to {json_path}")
 
@@ -332,7 +350,7 @@ def save_catalog(record: dict, repo_root: Path) -> None:
         "# 🎬 DropEmbed Video Catalog\n",
         f"*Total Videos Uploaded: {len(catalog)}*\n",
         "| Date | Title | Watch Link | Embed Player Link | Embed Code (`<iframe>`) |",
-        "|---|---|---|---|---|"
+        "|---|---|---|---|---|",
     ]
     for v in catalog:
         date_str = v.get("uploaded_at", "")[:10]
@@ -342,7 +360,7 @@ def save_catalog(record: dict, repo_root: Path) -> None:
         v_iframe = f"`<iframe src=\"{v_embed}\" width=\"640\" height=\"360\" frameborder=\"0\" allowfullscreen></iframe>`"
         md_lines.append(f"| {date_str} | **{v_title}** | [Watch]({v_url}) | [Embed Player]({v_embed}) | {v_iframe} |")
 
-    with open(md_path, 'w', encoding='utf-8') as f:
+    with open(md_path, "w", encoding="utf-8") as f:
         f.write("\n".join(md_lines) + "\n")
     print(f"[Catalog] Updated {md_path}")
 
@@ -351,6 +369,7 @@ def notify_cpanel_database(record: dict) -> None:
     """
     Sends video details to cPanel MySQL database via a secure PHP API webhook.
     Requires CPANEL_API_URL and optional CPANEL_API_SECRET environment variables.
+    Includes direct server IP fallback to prevent DNS propagation failures.
     """
     cpanel_url = os.environ.get("CPANEL_API_URL")
     if not cpanel_url:
@@ -363,7 +382,7 @@ def notify_cpanel_database(record: dict) -> None:
     headers = {
         "Content-Type": "application/json",
         "User-Agent": "GitHubActions-DropEmbedPipeline/1.0",
-        "Host": "jeevankart.in"
+        "Host": "jeevankart.in",
     }
     if cpanel_secret:
         headers["Authorization"] = f"Bearer {cpanel_secret}"
@@ -376,7 +395,7 @@ def notify_cpanel_database(record: dict) -> None:
             synced = True
         else:
             print(f"[cPanel DB] URL attempt returned HTTP {resp.status_code}. Trying direct server IP fallback...")
-    except Exception as e:
+    except requests.RequestException as e:
         print(f"[cPanel DB] URL attempt failed ({e}). Trying direct server IP fallback...")
 
     # Fallback directly to server IP with Host header if DNS propagation hasn't reached runner
@@ -388,7 +407,7 @@ def notify_cpanel_database(record: dict) -> None:
                 print(f"[cPanel DB] Successfully synced via server fallback: {resp_fallback.text}")
             else:
                 print(f"[cPanel DB Warning] Fallback sync failed (HTTP {resp_fallback.status_code}): {resp_fallback.text}")
-        except Exception as e2:
+        except requests.RequestException as e2:
             print(f"[cPanel DB Warning] Could not connect via fallback: {e2}")
 
 
@@ -405,24 +424,34 @@ def write_github_summary(record: dict) -> None:
     v_url = record.get("url", "")
     v_embed = record.get("embed_url", "")
     v_size = record.get("file_size_mb", 0)
+    v_poster = record.get("poster_url") or record.get("thumbnail_url") or ""
+    v_genres = record.get("genres") or "N/A"
+    v_desc = record.get("description") or ""
+
+    poster_markdown = f"\n![Poster]({v_poster})\n" if v_poster else ""
 
     summary_content = f"""
 ### 🚀 DropEmbed Upload Complete!
+
+{poster_markdown}
 
 | Field | Details |
 |---|---|
 | **Title** | **{v_title}** |
 | **Video ID** | `{v_id}` |
 | **File Size** | {v_size:.2f} MB |
+| **Genres** | {v_genres} |
 | **Watch URL** | [Open in DropEmbed]({v_url}) |
 | **Embed URL** | [Open Player]({v_embed}) |
+
+{f"> **Synopsis:** {v_desc[:250]}..." if v_desc else ""}
 
 #### 📋 Embed Player Code (`<iframe>`)
 ```html
 <iframe src="{v_embed}" width="640" height="360" frameborder="0" allowfullscreen allow="autoplay; fullscreen"></iframe>
 ```
 """
-    with open(summary_file, 'a', encoding='utf-8') as f:
+    with open(summary_file, "a", encoding="utf-8") as f:
         f.write(summary_content)
 
 
@@ -463,7 +492,7 @@ def main():
             video_path=video_file,
             title=final_title,
             api_key=api_key,
-            folder_id=args.folder_id
+            folder_id=args.folder_id,
         )
 
         video_id = upload_res.get("video_id", "")
@@ -483,17 +512,17 @@ def main():
             "description": anilist_meta.get("description") or "",
             "genres": anilist_meta.get("genres") or "",
             "year": anilist_meta.get("year"),
-            "uploaded_at": datetime.utcnow().isoformat() + "Z",
-            "source_input": args.source
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            "source_input": args.source,
         }
 
-        # Step 5: Save to Local Catalog
+        # Step 6: Save to Local Catalog
         save_catalog(record, repo_root)
 
-        # Step 6: Sync to cPanel MySQL Database (if configured)
+        # Step 7: Sync to cPanel MySQL Database (if configured)
         notify_cpanel_database(record)
 
-        # Step 7: GitHub Actions Step Summary
+        # Step 8: GitHub Actions Step Summary
         write_github_summary(record)
 
         print("\n==========================================")

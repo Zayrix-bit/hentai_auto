@@ -5,32 +5,32 @@ Fetches latest anime/hentai releases from RSS feeds (Sukebei Nyaa / AnimeTosho),
 checks against existing database, and automatically downloads and streams to DropEmbed.
 """
 
-import os
-import sys
-import re
 import json
-import time
+import os
+import shutil
+import sys
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from pathlib import Path
-import requests
 
 # Import core pipeline methods
 from pipeline import (
-    resolve_source,
     download_with_aria2,
-    locate_largest_video,
     fetch_anilist_metadata,
-    upload_to_dropembed,
-    save_catalog,
+    locate_largest_video,
     notify_cpanel_database,
-    write_github_summary
+    resolve_source,
+    save_catalog,
+    upload_to_dropembed,
+    write_github_summary,
 )
 
 # Default public RSS feeds (Unblocked on GitHub cloud runners)
 DEFAULT_RSS_FEEDS = [
-    "https://sukebei.nyaa.si/?page=rss&c=1_1", # English-translated Art/Anime
-    "https://sukebei.nyaa.si/?page=rss",       # All latest releases
+    "https://sukebei.nyaa.si/?page=rss&c=1_1",  # English-translated Art/Anime
+    "https://sukebei.nyaa.si/?page=rss",        # All latest releases
 ]
 
 
@@ -40,12 +40,12 @@ def fetch_feed_items(feed_url: str, max_items: int = 15) -> list[dict]:
     """
     print(f"[Auto Watcher] Fetching RSS feed: {feed_url}...")
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"}
-    
+
     try:
         req = urllib.request.Request(feed_url, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as resp:
             content = resp.read()
-    except Exception as e:
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
         print(f"[Auto Watcher Warning] Failed to fetch {feed_url}: {e}")
         return []
 
@@ -57,9 +57,9 @@ def fetch_feed_items(feed_url: str, max_items: int = 15) -> list[dict]:
             return []
 
         for item in channel.findall("item")[:max_items]:
-            title = item.findtext("title", "").strip()
-            link = item.findtext("link", "").strip()
-            guid = item.findtext("guid", "").strip()
+            title = (item.findtext("title") or "").strip()
+            link = (item.findtext("link") or "").strip()
+            guid = (item.findtext("guid") or "").strip()
 
             # Some feeds provide direct magnet or torrent download link
             magnet = ""
@@ -76,9 +76,9 @@ def fetch_feed_items(feed_url: str, max_items: int = 15) -> list[dict]:
                 items.append({
                     "title": title,
                     "source": source_link,
-                    "guid": guid or link
+                    "guid": guid or link,
                 })
-    except Exception as e:
+    except ET.ParseError as e:
         print(f"[Auto Watcher Error] XML parse error for {feed_url}: {e}")
 
     print(f"[Auto Watcher] Found {len(items)} items in feed.")
@@ -93,7 +93,7 @@ def load_processed_guids(repo_root: Path) -> set:
     json_path = repo_root / "data" / "videos.json"
     if json_path.exists():
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
+            with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 for item in data:
                     if "source_input" in item:
@@ -102,7 +102,7 @@ def load_processed_guids(repo_root: Path) -> set:
                         processed.add(item["title"].lower())
                     if "video_id" in item:
                         processed.add(item["video_id"])
-        except Exception:
+        except (json.JSONDecodeError, OSError):
             pass
 
     return processed
@@ -128,7 +128,7 @@ def run_auto_watcher(max_new_videos: int = 2) -> None:
         items = fetch_feed_items(feed)
         if items:
             candidate_items.extend(items)
-            break # Got items from primary feed
+            break  # Got items from primary feed
 
     if not candidate_items:
         print("[Auto Watcher] No feed items found. Exiting.")
@@ -152,9 +152,9 @@ def run_auto_watcher(max_new_videos: int = 2) -> None:
     download_dir = repo_root / "downloads"
 
     for item in new_items[:max_new_videos]:
-        print("\n" + "="*50)
+        print("\n" + "=" * 50)
         print(f"▶ Processing Release: {item['title']}")
-        print("="*50)
+        print("=" * 50)
 
         try:
             # 1. Resolve source & AnimeTosho preview
@@ -176,7 +176,7 @@ def run_auto_watcher(max_new_videos: int = 2) -> None:
             upload_res = upload_to_dropembed(
                 video_path=video_file,
                 title=final_title,
-                api_key=api_key
+                api_key=api_key,
             )
 
             video_id = upload_res.get("video_id", "")
@@ -196,8 +196,8 @@ def run_auto_watcher(max_new_videos: int = 2) -> None:
                 "description": anilist_meta.get("description") or "",
                 "genres": anilist_meta.get("genres") or "",
                 "year": anilist_meta.get("year"),
-                "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "source_input": item["source"]
+                "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                "source_input": item["source"],
             }
 
             # 6. Save to local repository catalog
@@ -212,17 +212,20 @@ def run_auto_watcher(max_new_videos: int = 2) -> None:
             processed_count += 1
             print(f"[Auto Watcher] Successfully processed: {final_title}")
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - protect batch loop from single item failures
             print(f"[Auto Watcher Error] Failed to process {item['title']}: {e}")
 
         finally:
             if download_dir.exists():
-                import shutil
                 shutil.rmtree(download_dir, ignore_errors=True)
 
     print(f"\n[Auto Watcher] Finished! Total new videos uploaded: {processed_count}")
 
 
 if __name__ == "__main__":
-    max_count = int(sys.argv[1]) if len(sys.argv) > 1 else 2
-    run_auto_watcher(max_new_videos=max_count)
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Automated RSS Watcher for DropEmbed Pipeline")
+    parser.add_argument("max_count", nargs="?", type=int, default=2, help="Max new videos to process (default: 2)")
+    args = parser.parse_args()
+    run_auto_watcher(max_new_videos=args.max_count)
