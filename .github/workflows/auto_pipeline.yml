@@ -18,6 +18,10 @@ on:
         description: 'Maximum catalog pages to scrape from user profile'
         required: false
         default: '5'
+      targets_file:
+        description: 'Explicit targets JSON file path (e.g. data/missing_targets.json)'
+        required: false
+        default: ''
 
 concurrency:
   group: auto-feed-pipeline
@@ -82,7 +86,8 @@ jobs:
             --max-videos "${{ github.event.inputs.max_videos || '85' }}" \
             --pages "${{ github.event.inputs.max_pages || '5' }}" \
             --worker-index ${{ matrix.worker.index }} \
-            --total-workers 10
+            --total-workers 10 \
+            --targets-file "${{ github.event.inputs.targets_file || '' }}"
 
       - name: Upload Worker Output Artifact
         if: always()
