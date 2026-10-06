@@ -54,7 +54,7 @@ def get_base_series(title):
     for base in KNOWN_FULL_EPISODES:
         if base.lower() in tl:
             return base
-    return title
+    return re.sub(r'\s+\d+$', '', title).strip()
 
 def extract_episode_or_part(title, existing_ep):
     tl = title.lower()
@@ -80,12 +80,16 @@ def extract_episode_or_part(title, existing_ep):
     if m:
         return f"{int(m.group(1)):02d}"
         
+    m_trailing = re.search(r'\s+(\d+)$', title)
+    if m_trailing and (not existing_ep or existing_ep == "01"):
+        return f"{int(m_trailing.group(1)):02d}"
+
     return existing_ep or "01"
 
 series_map = defaultdict(list)
 for v in data:
     title = v.get("title", "")
-    base = get_base_series(title)
+    base = v.get("series") or get_base_series(title)
     ep = extract_episode_or_part(title, v.get("episode", ""))
     part = v.get("part", "")
     series_map[base].append({

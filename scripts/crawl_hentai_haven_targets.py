@@ -203,7 +203,7 @@ def resolve_embed_to_mp4(part_info: dict) -> dict | None:
     return None
 
 
-def crawl_targets(target_count: int = 100, max_pages: int = 6) -> list[dict]:
+def crawl_targets(target_count: int = 100, max_pages: int = 15) -> list[dict]:
     """
     Crawls Hentai Haven browse pages, extracts parts, deduplicates, and resolves MP4s.
     """
@@ -242,7 +242,7 @@ def crawl_targets(target_count: int = 100, max_pages: int = 6) -> list[dict]:
                 discovered_parts.append(p)
 
         print(f"  > Total candidate unuploaded parts collected so far: {len(discovered_parts)}")
-        if len(discovered_parts) >= target_count:
+        if len(discovered_parts) >= target_count + 30:
             break
 
     print(f"\n[Resolver] Resolving direct CDN MP4 links for {min(len(discovered_parts), target_count)} targets...")
