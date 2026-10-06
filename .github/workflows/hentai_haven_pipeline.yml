@@ -1,4 +1,4 @@
-name: Hentai Haven Direct Pipeline (100 Videos / 10 Parallel Workers)
+name: Hentai Haven Direct Pipeline (15 Parallel Workers)
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   auto_upload:
-    name: Worker ${{ matrix.worker.id }}/10
+    name: Worker ${{ matrix.worker.id }}/15
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -38,6 +38,11 @@ jobs:
           - { id: 8, index: 7 }
           - { id: 9, index: 8 }
           - { id: 10, index: 9 }
+          - { id: 11, index: 10 }
+          - { id: 12, index: 11 }
+          - { id: 13, index: 12 }
+          - { id: 14, index: 13 }
+          - { id: 15, index: 14 }
 
     steps:
       - name: Checkout Repository
@@ -74,7 +79,7 @@ jobs:
             --targets-file "${{ github.event.inputs.targets_file || 'data/hentai_haven_targets.json' }}" \
             --max-videos ${{ github.event.inputs.max_videos_per_worker || '15' }} \
             --worker-index ${{ matrix.worker.index }} \
-            --total-workers 10
+            --total-workers 15
 
       - name: Upload Worker Output Artifact
         if: always()
