@@ -56,6 +56,21 @@ def resolve_source(source_url: str) -> tuple[str, str, str]:
     source_url = source_url.strip()
     title_hint = ""
 
+    # Check if Hentai Haven / Hentai Ocean URL
+    if "hentai-haven.cc" in source_url or "hentaiocean.com" in source_url:
+        print(f"[Resolver] Detected Hentai Haven / Ocean URL: {source_url}")
+        try:
+            try:
+                from scrape_hentai_haven import resolve_hentai_haven
+            except ImportError:
+                from scripts.scrape_hentai_haven import resolve_hentai_haven
+            hh = resolve_hentai_haven(source_url)
+            if hh and hh.get("mp4_url"):
+                print(f"[Resolver] Extracted direct CDN MP4: {hh['mp4_url']}")
+                return hh["mp4_url"], hh.get("title", ""), hh.get("thumbnail", "")
+        except Exception as e:
+            print(f"[Resolver Warning] Hentai Haven scraping failed ({e}), passing raw URL")
+
     # Check if AnimeTosho view URL
     if "animetosho.org/view/" in source_url:
         print(f"[Resolver] Detected AnimeTosho URL: {source_url}")
