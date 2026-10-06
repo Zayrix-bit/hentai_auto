@@ -18,7 +18,7 @@ KNOWN_FULL_EPISODES = {
     "Harem Camp": {"total": 8, "type": "TV/Shorts", "notes": "8 episodes total"},
     "The Bird in a Shell": {"total": 4, "type": "OVA", "notes": "4 character OVA parts complete"},
     "Shin Ruri-iro no Yuki": {"total": 4, "type": "OVA", "notes": "4 OVA parts complete"},
-    "Nightmare Campus": {"total": 4, "type": "OVA", "notes": "4 parts (Episodes 1-4)"},
+    "Nightmare Campus": {"total": 5, "type": "OVA", "notes": "5 OVA parts complete (Episodes 1-5)"},
     "Pigeon Blood": {"total": 2, "type": "OVA", "notes": "2 training parts complete"},
     "Wet Nurse": {"total": 2, "type": "OVA", "notes": "2 parts complete"},
     "Spotlight": {"total": 2, "type": "OVA", "notes": "2 parts complete"},
@@ -64,10 +64,11 @@ def extract_episode_or_part(title, existing_ep):
         if f"part {w}" in tl or f"{w} training" in tl:
             return num
     
-    # Check for Nightmare Campus 2, 3, 4
-    m = re.search(r'nightmare campus\s+(\d+)', tl)
+    # Check for Nightmare Campus episodes (e.g. "Nightmare Campus 4", "Nightmare Campus ... ep1", "ep5")
+    m = re.search(r'(?:nightmare campus\s+(\d+)|(?:nightmare campus|gedou gakuen).*?(?:ep|#)\s*(\d+))', tl)
     if m:
-        return f"{int(m.group(1)):02d}"
+        val = m.group(1) or m.group(2)
+        return f"{int(val):02d}"
 
     # Check for Sex on the Train #02
     m = re.search(r'#(\d+)', tl)

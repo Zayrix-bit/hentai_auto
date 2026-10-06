@@ -1,5 +1,7 @@
 # Temporary download folders
 downloads/
+downloads_*/
+test_artifacts/
 *.mp4
 *.mkv
 *.avi

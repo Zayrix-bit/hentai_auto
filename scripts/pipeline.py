@@ -109,6 +109,15 @@ def resolve_source(source_url: str) -> tuple[str, str, str]:
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
             print(f"[Resolver Warning] Could not scrape AnimeTosho page ({e}), using raw URL")
 
+    # Convert Sukebei / Nyaa /view/ URLs to direct /download/...torrent URLs
+    m_nyaa = re.search(r"https?://(sukebei\.)?nyaa\.si/view/(\d+)", source_url)
+    if m_nyaa:
+        sub = m_nyaa.group(1) or ""
+        sid = m_nyaa.group(2)
+        resolved_torrent = f"https://{sub}nyaa.si/download/{sid}.torrent"
+        print(f"[Resolver] Converted view URL to direct torrent: {resolved_torrent}")
+        return resolved_torrent, title_hint, ""
+
     # If it's a magnet link with a display name (&dn=)
     if source_url.startswith("magnet:?"):
         parsed = urllib.parse.parse_qs(urllib.parse.urlparse(source_url).query)
@@ -439,7 +448,7 @@ def download_with_aria2(source: str, download_dir: Path) -> None:
         tracker_arg = ",".join(PUBLIC_TRACKERS)
         cmd.extend([
             "--seed-time=0",               # Stop seeding immediately once download completes
-            "--bt-stop-timeout=150",       # Timeout if no seeders/traffic for 150s (give peers time to handshake on DHT)
+            "--bt-stop-timeout=300",       # Timeout if no seeders/traffic for 300s (give peers time to handshake)
             f"--bt-tracker={tracker_arg}", # Inject fast DHT public trackers
             "--follow-torrent=mem",
             "--enable-dht=true",
@@ -484,13 +493,13 @@ def download_with_aria2(source: str, download_dir: Path) -> None:
             if "DL:" in line_clean and "DL:0B" not in line_clean:
                 last_progress_time = time.time()
 
-        # Watchdog: terminate if download has made 0 progress for 150s or total 600s exceeded
-        if time.time() - last_progress_time > 150:
-            print("[Aria2c Watchdog] Download stalled (no data received for 150s). Terminating...")
+        # Watchdog: terminate if download has made 0 progress for 240s or total 1500s (25m) exceeded
+        if time.time() - last_progress_time > 240:
+            print("[Aria2c Watchdog] Download stalled (no data received for 240s). Terminating...")
             process.terminate()
             break
-        if time.time() - start_time > 600:
-            print("[Aria2c Watchdog] Download exceeded 600s maximum threshold. Terminating...")
+        if time.time() - start_time > 1500:
+            print("[Aria2c Watchdog] Download exceeded 1500s maximum threshold. Terminating...")
             process.terminate()
             break
 

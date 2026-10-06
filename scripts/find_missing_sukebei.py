@@ -137,13 +137,17 @@ def search_sukebei_html(query: str, category: str = "1_1", max_results: int = 15
             if not sid and torrent_url:
                 sid = torrent_url.split("/")[-1].replace(".torrent", "")
 
+            # Ensure direct .torrent download link is always preferred for aria2 over HTML view URLs
+            if sid and (not torrent_url or "/view/" in torrent_url):
+                torrent_url = f"https://sukebei.nyaa.si/download/{sid}.torrent"
+
             source_link = torrent_url or magnet_url or view_url
             if title and source_link:
                 results.append({
                     "title": title,
-                    "torrent": torrent_url or view_url,
+                    "torrent": torrent_url,
                     "magnet": magnet_url,
-                    "source": source_link,
+                    "source": torrent_url or magnet_url,
                     "seeders": seeders,
                     "source_id": sid,
                     "view_url": view_url,
