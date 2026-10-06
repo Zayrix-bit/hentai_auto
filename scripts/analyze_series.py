@@ -48,7 +48,19 @@ KNOWN_FULL_EPISODES = {
     "JK to Ero Konbini Tenchou": {"total": 6, "type": "OVA", "notes": "6 OVA episodes complete"},
     "Isekai Harem Monogatari": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
     "Kegareboshi": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
-    "Hajimete no Hitozuma": {"total": 5, "type": "OVA", "notes": "5 OVA episodes complete"}
+    "Hajimete no Hitozuma": {"total": 5, "type": "OVA", "notes": "5 OVA episodes complete"},
+    "Ichigo Aika: Zatsu de Namaiki na Imouto to Warikirenai Ani": {"total": 12, "type": "TV/Shorts", "notes": "12 episodes complete"},
+    "Arisugawa Ren tte Honto wa Onna Nanda yo ne": {"total": 8, "type": "TV/Shorts", "notes": "8 episodes complete"},
+    "Imaizumin-chi wa Douyara Gal no Tamariba ni Natteru Rashii": {"total": 6, "type": "OVA", "notes": "6 OVA episodes complete"},
+    "Isekai Kita no de Sukebe Skill de Zenryoku Ouka Shiyou to Omou": {"total": 7, "type": "OVA", "notes": "7 episodes complete"},
+    "Tsundero Series": {"total": 6, "type": "OVA", "notes": "6 episodes complete"},
+    "Eroriman": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Hime-sama Love Life!": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Iribitari Gal ni Manko Tsukawasete Morau Hanashi": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Dousou Kai: Yesterday Once More": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Houkago: Nureta Seifuku": {"total": 3, "type": "OVA", "notes": "3 OVA episodes complete"},
+    "Nagachichi Nagai-san": {"total": 3, "type": "OVA", "notes": "3 OVA episodes complete"},
+    "Akiba-kei Kanojo": {"total": 3, "type": "OVA", "notes": "3 OVA episodes complete"}
 }
 
 import re
