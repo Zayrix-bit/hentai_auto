@@ -60,7 +60,29 @@ KNOWN_FULL_EPISODES = {
     "Dousou Kai: Yesterday Once More": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
     "Houkago: Nureta Seifuku": {"total": 3, "type": "OVA", "notes": "3 OVA episodes complete"},
     "Nagachichi Nagai-san": {"total": 3, "type": "OVA", "notes": "3 OVA episodes complete"},
-    "Akiba-kei Kanojo": {"total": 3, "type": "OVA", "notes": "3 OVA episodes complete"}
+    "Akiba-kei Kanojo": {"total": 3, "type": "OVA", "notes": "3 OVA episodes complete"},
+    "Guilty Hole": {"total": 8, "type": "TV/Shorts", "notes": "8 episodes complete"},
+    "1LDK+JK Ikinari Doukyo? Micchaku!? Hatsu Ecchi!!?": {"total": 6, "type": "OVA", "notes": "6 OVA episodes complete"},
+    "Modaete yo, Adam-kun": {"total": 8, "type": "TV/Shorts", "notes": "8 episodes complete"},
+    "Tiny Evil": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Shakuen no Eris": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "White Blue": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Nozoki Kanojo": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Oni Chichi: Refresh": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Sansha Mendan: Rensa Suru Chijoku Choukyou no Gakuen": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Mako-chan Kaihatsu Nikki": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Papa Katsu!": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Saimin Seishidou": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Kimi wa Yasashiku Netorareru The Animation": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Tsuma ni Damatte Sokubaikai ni Ikun ja Nakatta": {"total": 2, "type": "OVA", "notes": "2 OVA episodes complete"},
+    "Yari Agari": {"total": 2, "type": "OVA", "notes": "2 OVA episodes complete"},
+    "Oshikake! Bakunyuu Gyaru Harem Seikatsu": {"total": 2, "type": "OVA", "notes": "2 OVA episodes complete"},
+    "Netorareta Bakunyuu Tsuma-tachi": {"total": 2, "type": "OVA", "notes": "2 OVA episodes complete"},
+    "Natsu Zuma": {"total": 2, "type": "OVA", "notes": "2 OVA episodes complete"},
+    "Ran-Sem: Hakudaku Delmo Tsuma no Miira Tori": {"total": 2, "type": "OVA", "notes": "2 OVA episodes complete"},
+    "Rin x Sen: Hakudaku Onna Kyoushi to Yaroudomo": {"total": 2, "type": "OVA", "notes": "2 OVA episodes complete"},
+    "Otogibanashi no Onigokko": {"total": 2, "type": "OVA", "notes": "2 OVA episodes complete"},
+    "Oni Chichi: Re-born": {"total": 2, "type": "OVA", "notes": "2 OVA episodes complete"}
 }
 
 import re
