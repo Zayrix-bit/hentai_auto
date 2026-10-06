@@ -1,0 +1,205 @@
+name: Automated Hourly Uploader (50 Videos / Hour)
+
+on:
+  schedule:
+    # 30 * * * * corresponds to :30 of every hour UTC
+    # 22:30 UTC = 04:00 AM IST (Exact start time: 10/7/2026 4:00 AM IST)
+    # 23:30 UTC = 05:00 AM IST, 00:30 UTC = 06:00 AM IST, etc.
+    - cron: '30 * * * *'
+  workflow_dispatch:
+    inputs:
+      videos_count:
+        description: 'Number of videos to crawl and upload in this batch'
+        required: false
+        default: '50'
+      bypass_start_time:
+        description: 'Bypass 4:00 AM IST check and run immediately'
+        type: boolean
+        default: false
+
+concurrency:
+  group: hourly-uploader
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  check_and_crawl:
+    name: Check Schedule & Crawl Targets
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.time_check.outputs.should_run }}
+      target_count: ${{ steps.crawl.outputs.target_count }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify Scheduled Start Time (10/7/2026 4:00 AM IST)
+        id: time_check
+        run: |
+          CURRENT_EPOCH=$(date +%s)
+          # 2026-10-07 04:00:00 IST = 2026-10-06 22:30:00 UTC = Epoch 1791325800
+          START_EPOCH=1791325800
+          BYPASS="${{ github.event.inputs.bypass_start_time || 'false' }}"
+
+          echo "Current Epoch: $CURRENT_EPOCH ($(date -u))"
+          echo "Start Target Epoch: $START_EPOCH (2026-10-07 04:00:00 IST)"
+
+          if [ "$BYPASS" = "true" ] || [ "$CURRENT_EPOCH" -ge "$START_EPOCH" ]; then
+            echo "Time check passed. Proceeding with crawl & upload."
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            DIFF=$((START_EPOCH - CURRENT_EPOCH))
+            HOURS=$((DIFF / 3600))
+            MINS=$(( (DIFF % 3600) / 60 ))
+            echo "Current time is before 10/7/2026 4:00 AM IST ($HOURS hours $MINS minutes remaining)."
+            echo "Skipping execution until scheduled start time."
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install Dependencies
+        if: steps.time_check.outputs.should_run == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r scripts/requirements.txt
+
+      - name: Crawl Fresh Hentai Haven Targets
+        id: crawl
+        if: steps.time_check.outputs.should_run == 'true'
+        run: |
+          COUNT="${{ github.event.inputs.videos_count || '50' }}"
+          python scripts/crawl_hentai_haven_targets.py --count "$COUNT" --pages 80
+          TARGET_COUNT=$(python -c "import json; print(len(json.load(open('data/hentai_haven_targets.json'))))")
+          echo "target_count=$TARGET_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Upload Targets Artifact
+        if: steps.time_check.outputs.should_run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hourly-targets
+          path: data/hentai_haven_targets.json
+          if-no-files-found: error
+
+  upload_workers:
+    name: Worker ${{ matrix.worker.id }}/5
+    needs: [check_and_crawl]
+    if: needs.check_and_crawl.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        worker:
+          - { id: 1, index: 0 }
+          - { id: 2, index: 1 }
+          - { id: 3, index: 2 }
+          - { id: 4, index: 3 }
+          - { id: 5, index: 4 }
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install aria2 (Cloud Downloader)
+        timeout-minutes: 3
+        run: |
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout="15" -qq || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends aria2 || sudo apt-get install -y aria2
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r scripts/requirements.txt
+
+      - name: Download Targets Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: hourly-targets
+          path: data
+
+      - name: Process Worker (CDN -> DropEmbed -> cPanel)
+        env:
+          PYTHONPATH: .
+          DROPEMBED_API_KEY: ${{ secrets.DROPEMBED_API_KEY }}
+          CPANEL_API_URL: ${{ secrets.CPANEL_API_URL }}
+          CPANEL_API_SECRET: ${{ secrets.CPANEL_API_SECRET }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python scripts/auto_watcher.py \
+            --targets-file data/hentai_haven_targets.json \
+            --max-videos 15 \
+            --worker-index ${{ matrix.worker.index }} \
+            --total-workers 5
+
+      - name: Upload Worker Output Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-catalog-${{ matrix.worker.index }}
+          path: data/worker_output_*.json
+          if-no-files-found: ignore
+
+  aggregate_and_commit:
+    name: Merge Catalog & Push
+    needs: [upload_workers]
+    runs-on: ubuntu-latest
+    if: always() && needs.check_and_crawl.outputs.should_run == 'true'
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r scripts/requirements.txt
+
+      - name: Download All Worker Catalog Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: worker_artifacts
+          pattern: worker-catalog-*
+          merge-multiple: true
+
+      - name: Merge Worker Catalogs
+        env:
+          PYTHONPATH: .
+        run: |
+          python scripts/merge_catalogs.py worker_artifacts
+
+      - name: Commit and Push Updated Video Catalog
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/videos.json data/videos.md
+          if git diff --staged --quiet; then
+            echo "No changes to catalog."
+          else
+            git commit -m "chore(auto): hourly automated upload batch [skip ci]"
+            git pull --rebase
+            git push
+          fi
