@@ -149,13 +149,23 @@ def fetch_dropembed_remote_catalog(api_key: str) -> dict:
                 break
 
             for v in items:
+                v_id = v.get("id") or v.get("video_id")
+                if v.get("status") == "error":
+                    # Delete or ignore broken video from remote catalog to allow repair
+                    if v_id and api_key:
+                        try:
+                            dropembed_api_request("DELETE", f"https://upload.dropembed.com/api/videos/{v_id}", api_key, timeout=10)
+                            print(f"[DropEmbed Cleanup] Deleted broken error video {v_id} from account.")
+                        except Exception:
+                            pass
+                    continue
+
                 v_title = v.get("title") or ""
                 if v_title:
                     remote_data["titles"].add(v_title.strip().lower())
                     norm = normalize_title(v_title)
                     if norm:
                         remote_data["norm_titles"].add(norm)
-                v_id = v.get("id") or v.get("video_id")
                 if v_id:
                     remote_data["video_ids"].add(str(v_id))
 
