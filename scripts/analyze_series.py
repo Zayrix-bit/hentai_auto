@@ -29,8 +29,26 @@ KNOWN_FULL_EPISODES = {
     "Sex on the Train with Horny Sluts": {"total": 2, "type": "OVA", "notes": "Episode 2 uploaded"},
     "Bijukubo": {"total": 2, "type": "OVA", "notes": "Part 2 uploaded"},
     "Booby Life": {"total": 1, "type": "OVA", "notes": "Single 60-min OVA volume complete (Oppai Life)"},
-    "Muchuu no Tou": {"total": 1, "type": "Currently Airing (Summer/Fall 2026)", "notes": "Episode 1 released"},
-    "KAMUI": {"total": 1, "type": "TV/Shorts", "notes": "Episode 1 Dub released (Ushiro no Shoumen Kamui-san)"}
+    "Muchuu no Tou": {"total": 2, "type": "Currently Airing (Summer/Fall 2026)", "notes": "Episodes 1 & 2 released"},
+    "KAMUI": {"total": 1, "type": "TV/Shorts", "notes": "Episode 1 Dub released (Ushiro no Shoumen Kamui-san)"},
+    "Ateuma Chara no Kuse Shite, Supadari Ouji ni Chouai Sarete Imasu": {"total": 8, "type": "TV/Shorts", "notes": "8 episodes complete"},
+    "Papa Datte, Shitai": {"total": 8, "type": "TV/Shorts", "notes": "8 episodes complete"},
+    "Kuro Gal ni Natta kara Shin`yuu to Shite Mita": {"total": 8, "type": "TV/Shorts", "notes": "8 episodes complete"},
+    "Maou Evelogia ni Mi o Sasageyo": {"total": 9, "type": "TV/Shorts", "notes": "9 episodes complete"},
+    "Mori no Kuma-san, Toumin-chuu": {"total": 9, "type": "TV/Shorts", "notes": "9 episodes complete"},
+    "Reika wa Karei na Boku no Joou": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Yatara Yarashii Fukami-kun": {"total": 8, "type": "TV/Shorts", "notes": "8 episodes complete"},
+    "Dokidoki Little Ooyasan": {"total": 6, "type": "OVA", "notes": "6 OVA episodes complete"},
+    "Enjo Kouhai": {"total": 10, "type": "OVA", "notes": "10 OVA episodes complete"},
+    "Sister Breeder": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Boku no Risou no Isekai Seikatsu": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Ane Chijo Max Heart": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Baka na Imouto o Rikou ni Suru no wa Ore no XX Dake na Ken ni Tsuite": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Ookii Onnanoko wa Suki desu ka?": {"total": 12, "type": "TV/Shorts", "notes": "12 episodes complete"},
+    "JK to Ero Konbini Tenchou": {"total": 6, "type": "OVA", "notes": "6 OVA episodes complete"},
+    "Isekai Harem Monogatari": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Kegareboshi": {"total": 4, "type": "OVA", "notes": "4 OVA episodes complete"},
+    "Hajimete no Hitozuma": {"total": 5, "type": "OVA", "notes": "5 OVA episodes complete"}
 }
 
 import re
