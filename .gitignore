@@ -20,3 +20,9 @@ env/
 
 # Environment files
 .env
+
+# Scratch and debug files
+scratch/
+data/*_sample.json
+data/hentaicity_categories.json
+
