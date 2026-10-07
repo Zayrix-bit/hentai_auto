@@ -1,9 +1,10 @@
 # 🎬 DropEmbed Video Catalog
 
-*Total Videos Uploaded: 907*
+*Total Videos Uploaded: 908*
 
 | Date | Title | Season | Episode | Part | MAL | Score | Watch Link | Embed Player Link |
 |---|---|---|---|---|---|---|---|---|
+| 2026-10-07 | **[Doomdos] - Meltys Quest #1 - 01 [1080p OV WEB-DL]** | S01 | E01 | - | [MAL #41375](https://myanimelist.net/anime/41375/Meltys_Quest) | ⭐ 6.07 | [Watch](https://dropembed.com/v/f9790091-4b38-4805-a2b6-afaca5d9e8a1) | [Embed Player](https://dropembed.com/e/f9790091-4b38-4805-a2b6-afaca5d9e8a1) |
 | 2026-10-07 | **Summer: Inaka no Seikatsu 2** | S01 | E02 | Pt.Part 2 | [MAL #51721](https://myanimelist.net/anime/51721/Summer__Inaka_no_Seikatsu) | ⭐ 6.43 | [Watch](https://dropembed.com/v/b886d9cb-9673-45df-9b40-6e56d9e59fe0) | [Embed Player](https://dropembed.com/e/b886d9cb-9673-45df-9b40-6e56d9e59fe0) |
 | 2026-10-07 | **Soshite Watashi wa Sensei ni... 1** | S01 | E01 | Pt.Part 1 | [MAL #49329](https://myanimelist.net/anime/49329/Soshite_Watashi_wa_Sensei_ni) | ⭐ 6.21 | [Watch](https://dropembed.com/v/b12c22c7-1f23-4b09-8b4f-453aebbaff3f) | [Embed Player](https://dropembed.com/e/b12c22c7-1f23-4b09-8b4f-453aebbaff3f) |
 | 2026-10-07 | **Shinsei Kourin Dacryon Luna 1** | S01 | E01 | Pt.Part 1 | [MAL #60044](https://myanimelist.net/anime/60044/Shinsei_Kourin_Dacryon_Luna) | ⭐ 5.37 | [Watch](https://dropembed.com/v/3137269e-2a8b-496b-8746-c607e67ccb98) | [Embed Player](https://dropembed.com/e/3137269e-2a8b-496b-8746-c607e67ccb98) |
