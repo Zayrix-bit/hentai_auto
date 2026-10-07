@@ -49,7 +49,7 @@ jobs:
           if-no-files-found: error
 
   upload_workers:
-    name: ReUpload Worker ${{ matrix.worker.id }}/5
+    name: ReUpload Worker ${{ matrix.worker.id }}/8
     needs: [prepare_targets]
     if: needs.prepare_targets.outputs.target_count != '0'
     runs-on: ubuntu-latest
@@ -63,6 +63,9 @@ jobs:
           - { id: 3, index: 2 }
           - { id: 4, index: 3 }
           - { id: 5, index: 4 }
+          - { id: 6, index: 5 }
+          - { id: 7, index: 6 }
+          - { id: 8, index: 7 }
 
     steps:
       - name: Checkout Repository
@@ -105,7 +108,7 @@ jobs:
             --targets-file data/reupload_targets.json \
             --max-videos ${{ github.event.inputs.max_videos_per_worker || '10' }} \
             --worker-index ${{ matrix.worker.index }} \
-            --total-workers 5
+            --total-workers 8
 
       - name: Upload Worker Output Artifact
         if: always()
