@@ -368,6 +368,9 @@ def is_already_processed(item: dict, processed: dict) -> bool:
     3. Exact release title (lowercased)
     Does NOT collapse distinct releases (e.g. [Dub] vs [Multi-Audio] vs [Uncensored]) that have distinct Sukebei IDs.
     """
+    if item.get("_reupload"):
+        return False
+
     # 1. Check numeric source_id (Sukebei ID or BTIH hash)
     source_id = item.get("source_id") or extract_source_id(item.get("source", "")) or extract_source_id(item.get("guid", "")) or extract_source_id(item.get("torrent", ""))
     if source_id and str(source_id) in processed["source_ids"]:
@@ -490,6 +493,9 @@ def run_auto_watcher(
     download_dir = repo_root / f"downloads_w{worker_index}"
 
     for item in new_items:
+        if "source" not in item and "mp4_url" in item:
+            item["source"] = item["mp4_url"]
+
         if processed_count >= max_new_videos:
             print(f"[Auto Watcher] Target quota reached ({processed_count}/{max_new_videos} videos uploaded). Stopping.")
             break
@@ -529,7 +535,7 @@ def run_auto_watcher(
                     cur_title = final_title or video_file.stem
 
                 # Check if this specific episode file was already uploaded
-                if cur_title.strip().lower() in processed["raw_titles"]:
+                if not item.get("_reupload") and cur_title.strip().lower() in processed["raw_titles"]:
                     print(f"[Auto Watcher] Episode file '{cur_title}' already uploaded. Skipping duplicate file.")
                     continue
 
