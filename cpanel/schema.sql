@@ -1,5 +1,5 @@
 -- ========================================================
--- DropEmbed cPanel Database Schema
+-- Streamtape cPanel Database Schema
 -- Run this in cPanel -> phpMyAdmin -> Your Database -> SQL
 -- ========================================================
 

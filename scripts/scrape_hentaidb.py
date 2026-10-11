@@ -201,7 +201,7 @@ def scrape_episode_streams(watch_url: str, session: Optional[requests.Session] =
         })
 
     # Pick the best H.264 stream (1080p -> 720p -> 480p)
-    # H.264 is preferred for DropEmbed compatibility over AV1
+    # H.264 is preferred for Streamtape compatibility over AV1
     preferred_stream = None
     for target_res in [1080, 720, 480, 360]:
         h264_matches = [st for st in streams if st.get("resolution") == target_res and st.get("codec") == "h264"]

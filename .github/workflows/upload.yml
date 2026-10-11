@@ -1,4 +1,4 @@
-name: Upload to DropEmbed (Cloud Runner)
+name: Upload to Streamtape (Cloud Runner)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ on:
         type: string
         default: ''
       folder_id:
-        description: 'DropEmbed Folder ID (optional, leave empty for root)'
+        description: 'Streamtape Folder ID (optional, leave empty for root)'
         required: false
         type: string
         default: ''
@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   cloud_pipeline:
-    name: Download & Stream to DropEmbed
+    name: Download & Stream to Streamtape
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
@@ -50,7 +50,8 @@ jobs:
 
       - name: Run Pipeline (Download & Cloud-to-Cloud Upload)
         env:
-          DROPEMBED_API_KEY: ${{ secrets.DROPEMBED_API_KEY }}
+          STREAMTAPE_LOGIN: ${{ secrets.STREAMTAPE_LOGIN }}
+          STREAMTAPE_KEY: ${{ secrets.STREAMTAPE_KEY }}
           CPANEL_API_URL: ${{ secrets.CPANEL_API_URL }}
           CPANEL_API_SECRET: ${{ secrets.CPANEL_API_SECRET }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -69,7 +70,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to catalog."
           else
-            git commit -m "chore: catalog new DropEmbed upload [skip ci]"
+            git commit -m "chore: catalog new Streamtape upload [skip ci]"
             git pull --rebase
             git push
           fi

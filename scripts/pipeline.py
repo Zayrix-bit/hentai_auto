@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Cloud Pipeline: Torrent/AnimeTosho -> DropEmbed Uploader
+Cloud Pipeline: Torrent/AnimeTosho -> Streamtape Uploader
 Zero local bandwidth required - runs on GitHub Actions cloud runner.
 """
 
@@ -56,20 +56,24 @@ def resolve_source(source_url: str) -> tuple[str, str, str]:
     source_url = source_url.strip()
     title_hint = ""
 
-    # Check if Hentai Haven / Hentai Ocean URL
-    if "hentai-haven.cc" in source_url or "hentaiocean.com" in source_url:
-        print(f"[Resolver] Detected Hentai Haven / Ocean URL: {source_url}")
+    # Check if HentaiDB watch URL
+    if "hentaidb.xyz" in source_url:
+        print(f"[Resolver] Detected HentaiDB URL: {source_url}")
         try:
             try:
-                from scrape_hentai_haven import resolve_hentai_haven
+                from scrape_hentaidb import scrape_episode_streams
             except ImportError:
-                from scripts.scrape_hentai_haven import resolve_hentai_haven
-            hh = resolve_hentai_haven(source_url)
-            if hh and hh.get("mp4_url"):
-                print(f"[Resolver] Extracted direct CDN MP4: {hh['mp4_url']}")
-                return hh["mp4_url"], hh.get("title", ""), hh.get("thumbnail", "")
+                from scripts.scrape_hentaidb import scrape_episode_streams
+            st = scrape_episode_streams(source_url)
+            if st and st.get("preferred_stream"):
+                ep_num = st.get("episode_number")
+                ep_str = f" - {int(ep_num):02d}" if ep_num is not None else ""
+                series_t = st.get("series") or ""
+                resolved_title = f"{series_t}{ep_str}" if series_t else ""
+                print(f"[Resolver] Extracted direct HentaiDB CDN MP4: {st['preferred_stream']}")
+                return st["preferred_stream"], resolved_title, st.get("poster") or ""
         except Exception as e:
-            print(f"[Resolver Warning] Hentai Haven scraping failed ({e}), passing raw URL")
+            print(f"[Resolver Warning] HentaiDB stream resolution failed ({e}), passing raw URL")
 
     # Check if AnimeTosho view URL
     if "animetosho.org/view/" in source_url:
@@ -572,122 +576,84 @@ def locate_all_videos(download_dir: Path, min_size_mb: float = 10.0) -> list[Pat
     return video_files
 
 
-def dropembed_api_request(
-    method: str,
-    url: str,
-    api_key: str,
-    payload: dict | None = None,
+def streamtape_api_request(
+    endpoint: str,
+    st_login: str,
+    st_key: str,
+    extra_params: dict | None = None,
     timeout: int = 30,
 ) -> dict:
     """
-    Executes an API request to DropEmbed with multi-tier Cloudflare bypass:
-    1. Direct request to https://upload.dropembed.com/api/ (OVH backend, zero Cloudflare block).
-    2. curl_cffi with Chrome 120 browser impersonation on original URL.
-    3. Native system curl binary with browser headers.
-    4. Standard requests fallback.
-    Guarantees bypass of Cloudflare Managed Challenges and datacenter IP blocks.
+    Executes a GET request to the Streamtape API.
+    All Streamtape API calls use GET with login/key as query parameters.
+    Base URL: https://api.streamtape.com
+    Returns the parsed JSON response dict.
     """
-    method = method.upper()
+    base_url = f"https://api.streamtape.com/{endpoint.lstrip('/')}"
+    params = {"login": st_login, "key": st_key}
+    if extra_params:
+        params.update(extra_params)
+
     headers = {
-        "X-API-Key": api_key,
         "Accept": "application/json",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     }
-    if payload is not None:
-        headers["Content-Type"] = "application/json"
 
-    # Strategy 1: Direct backend host (upload.dropembed.com) which completely bypasses Cloudflare
-    direct_url = url.replace("https://dropembed.com/api/", "https://upload.dropembed.com/api/")
-    try:
-        r = requests.request(method, direct_url, json=payload, headers=headers, timeout=timeout, verify=False)
-        if r.status_code in (200, 201):
-            return r.json()
-        # If backend responded with JSON error (like 400, 401, 404), return it directly
+    for attempt in range(1, 4):
         try:
-            err_json = r.json()
-            if "success" in err_json:
-                return err_json
-        except (ValueError, json.JSONDecodeError):
-            pass
-        print(f"[DropEmbed API] Direct endpoint returned HTTP {r.status_code}. Trying curl_cffi fallback...")
-    except Exception as direct_err:  # noqa: BLE001
-        print(f"[DropEmbed API] Direct endpoint attempt failed: {direct_err}. Trying curl_cffi fallback...")
-
-    # Strategy 2: curl_cffi (Chrome TLS fingerprint) on original URL
-    try:
-        from curl_cffi import requests as cffi_requests
-
-        if method == "POST":
-            r = cffi_requests.post(url, json=payload, headers=headers, impersonate="chrome120", timeout=timeout)
-        elif method == "PATCH":
-            r = cffi_requests.patch(url, json=payload, headers=headers, impersonate="chrome120", timeout=timeout)
-        else:
-            r = cffi_requests.get(url, headers=headers, impersonate="chrome120", timeout=timeout)
-
-        if r.status_code in (200, 201):
-            return r.json()
-        print(f"[DropEmbed API] curl_cffi HTTP {r.status_code}. Trying system curl fallback...")
-    except Exception as cffi_err:  # noqa: BLE001
-        print(f"[DropEmbed API] curl_cffi attempt failed: {cffi_err}. Trying system curl fallback...")
-
-    # Strategy 3: System curl binary
-    try:
-        curl_bin = shutil.which("curl") or shutil.which("curl.exe")
-        if curl_bin:
-            cmd = [
-                curl_bin, "-s",
-                "-X", method, url,
-                "-H", f"X-API-Key: {api_key}",
-                "-H", "Accept: application/json",
-                "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            ]
-            if payload is not None:
-                cmd.extend(["-H", "Content-Type: application/json", "--data-raw", json.dumps(payload)])
-
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
-            if proc.returncode == 0 and proc.stdout:
-                return json.loads(proc.stdout)
-            print(f"[DropEmbed API] system curl exit {proc.returncode}. Trying requests...")
-    except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as curl_err:
-        print(f"[DropEmbed API] system curl warning: {curl_err}. Trying requests...")
-
-    # Strategy 4: Standard requests
-    try:
-        if method == "POST":
-            r = requests.post(url, json=payload, headers=headers, timeout=timeout)
-        elif method == "PATCH":
-            r = requests.patch(url, json=payload, headers=headers, timeout=timeout)
-        else:
-            r = requests.get(url, headers=headers, timeout=timeout)
-        return r.json()
-    except (requests.RequestException, json.JSONDecodeError, ValueError) as req_err:
-        raise RuntimeError(f"All DropEmbed API request methods failed for {url}: {req_err}") from req_err
+            r = requests.get(base_url, params=params, headers=headers, timeout=timeout)
+            data = r.json()
+            if data.get("status") == 200:
+                return data
+            if attempt < 3:
+                print(f"[Streamtape API] Attempt {attempt} returned status {data.get('status')}: {data.get('msg')}. Retrying...")
+                time.sleep(2)
+            else:
+                return data
+        except (requests.RequestException, json.JSONDecodeError, ValueError) as e:
+            if attempt < 3:
+                print(f"[Streamtape API] Attempt {attempt} failed: {e}. Retrying...")
+                time.sleep(2)
+            else:
+                raise RuntimeError(f"Streamtape API request failed for {endpoint}: {e}") from e
+    return {}
 
 
-def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: str = "") -> dict:
+def upload_to_streamtape(video_path: Path, title: str, st_login: str, st_key: str, folder_id: str = "") -> dict:
     """
-    Uploads video file to DropEmbed with 100% ORIGINAL PRISTINE QUALITY (1080p HD).
-    Uses DropEmbed's dedicated multi-GB direct upload endpoint (https://upload.dropembed.com/api/videos/upload)
-    which natively supports files up to 10 GB per file, zero compression, and completely bypasses Cloudflare.
-    If direct upload encounters network interruption, automatically falls back to Cloud Direct Relay.
+    Uploads video file to Streamtape with original quality.
+    Two-step process:
+    1. GET upload URL from /file/ul
+    2. POST file to that URL as multipart/form-data (field: file1)
+    Falls back to remote upload via GitHub Releases relay if direct upload fails.
     """
     file_size = video_path.stat().st_size
     file_size_mb = file_size / (1024 * 1024)
 
-    # Method 1: High-speed direct multipart upload to upload.dropembed.com (Supports up to 10 GB!)
-    direct_upload_url = "https://upload.dropembed.com/api/videos/upload"
+    # Method 1: Direct two-step multipart upload
     for attempt in range(1, 4):
         try:
-            print(f"\n[DropEmbed Direct Upload] Attempt {attempt}: Uploading original 1080p file: {video_path.name} ({file_size_mb:.2f} MB)...")
-            with open(video_path, "rb") as video_fp:
-                fields = {
-                    "title": title,
-                    "video": (video_path.name, video_fp, "application/octet-stream"),
-                }
-                if folder_id:
-                    fields["folder_id"] = str(folder_id)
+            print(f"\n[Streamtape Upload] Attempt {attempt}: Getting upload URL for: {video_path.name} ({file_size_mb:.2f} MB)...")
 
-                encoder = MultipartEncoder(fields=fields)
+            # Step 1: Get upload URL from Streamtape API
+            ul_params = {}
+            if folder_id:
+                ul_params["folder"] = folder_id
+            ul_data = streamtape_api_request("file/ul", st_login, st_key, extra_params=ul_params, timeout=15)
+
+            if ul_data.get("status") != 200 or not ul_data.get("result", {}).get("url"):
+                print(f"[Streamtape Upload] Could not get upload URL: {ul_data}")
+                time.sleep(3)
+                continue
+
+            upload_url = ul_data["result"]["url"]
+            print(f"[Streamtape Upload] Got upload URL, uploading original quality file...")
+
+            # Step 2: POST file to the upload URL
+            with open(video_path, "rb") as video_fp:
+                encoder = MultipartEncoder(fields={
+                    "file1": (video_path.name, video_fp, "application/octet-stream"),
+                })
                 last_reported = [-1]
 
                 def callback(monitor, reported=last_reported):
@@ -695,41 +661,58 @@ def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: s
                     if pct % 10 == 0 and pct != reported[0]:
                         reported[0] = pct
                         read_mb = monitor.bytes_read / (1024 * 1024)
-                        print(f"[DropEmbed Upload Progress] {pct}% ({read_mb:.1f} MB / {file_size_mb:.1f} MB)")
+                        print(f"[Streamtape Upload Progress] {pct}% ({read_mb:.1f} MB / {file_size_mb:.1f} MB)")
 
                 monitor = MultipartEncoderMonitor(encoder, callback)
                 headers = {
-                    "X-API-Key": api_key,
                     "Content-Type": monitor.content_type,
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                 }
-                resp = requests.post(direct_upload_url, data=monitor, headers=headers, timeout=1800, verify=False)
+                resp = requests.post(upload_url, data=monitor, headers=headers, timeout=1800)
 
             data = resp.json()
-            if data.get("success"):
-                video_id = data.get("video_id")
-                print(f"[DropEmbed Direct Upload] Succeeded! Assigned Video ID: {video_id}")
+            if data.get("status") == 200 and data.get("result"):
+                result = data["result"]
+                file_id = result.get("id") or result.get("linkid") or ""
+                file_url = result.get("url") or f"https://streamtape.com/v/{file_id}"
+
+                print(f"[Streamtape Upload] Succeeded! File ID: {file_id}")
+
+                # Rename file on Streamtape to match our title
+                if file_id and title:
+                    try:
+                        safe_name = re.sub(r'[^\w\s\-\.\(\)\[\]]', '', title).strip()
+                        if not safe_name.lower().endswith('.mp4'):
+                            safe_name += '.mp4'
+                        streamtape_api_request(
+                            "file/rename", st_login, st_key,
+                            extra_params={"file": file_id, "name": safe_name},
+                            timeout=10,
+                        )
+                    except Exception:  # noqa: BLE001, S110
+                        pass
+
                 return {
                     "success": True,
-                    "video_id": video_id,
+                    "video_id": file_id,
                     "title": title,
-                    "url": data.get("url") or f"https://dropembed.com/v/{video_id}",
-                    "embed_url": data.get("embed_url") or f"https://dropembed.com/e/{video_id}",
+                    "url": file_url,
+                    "embed_url": f"https://streamtape.com/e/{file_id}",
                 }
-            print(f"[DropEmbed Direct Upload] Attempt {attempt} returned non-success response: {data}")
+            print(f"[Streamtape Upload] Attempt {attempt} returned: {data}")
         except Exception as upload_err:  # noqa: BLE001
-            print(f"[DropEmbed Direct Upload] Attempt {attempt} error: {upload_err}")
+            print(f"[Streamtape Upload] Attempt {attempt} error: {upload_err}")
         time.sleep(3)
 
-    # Method 2: Fallback to Cloud Direct Relay (GitHub release asset -> DropEmbed remote-upload)
-    print(f"\n[DropEmbed 1080p Relay] Direct upload failed, initiating zero-loss Cloud Direct Relay ({file_size_mb:.2f} MB)...")
+    # Method 2: Fallback to Cloud Relay (GitHub release asset -> Streamtape remote-upload)
+    print(f"\n[Streamtape Relay] Direct upload failed, initiating Cloud Relay ({file_size_mb:.2f} MB)...")
 
     tag = f"relay-{int(time.time())}"
     repo_env = os.environ.get("GITHUB_REPOSITORY", "Zayrix-bit/hentai_auto")
 
-    # Create a safe ASCII filename without Japanese characters or special symbols
+    # Create a safe ASCII filename
     ext = video_path.suffix.lower() or ".mp4"
-    clean_relay_path = video_path.parent / f"relay_1080p_{tag}{ext}"
+    clean_relay_path = video_path.parent / f"relay_{tag}{ext}"
     try:
         os.link(video_path, clean_relay_path)
     except OSError:
@@ -740,13 +723,13 @@ def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: s
         str(clean_relay_path),
         "--target", "main",
         "--title", f"Relay {tag}",
-        "--notes", "Temporary relay asset for DropEmbed 1080p transfer",
+        "--notes", "Temporary relay asset for Streamtape transfer",
         "--repo", repo_env,
     ]
 
     try:
         subprocess.run(create_cmd, check=True, capture_output=True, text=True)
-        print("[DropEmbed 1080p Relay] Temporary release asset created successfully on cloud runner!")
+        print("[Streamtape Relay] Temporary release asset created on cloud runner!")
 
         raw_asset_url = f"https://github.com/{repo_env}/releases/download/{tag}/{clean_relay_path.name}"
 
@@ -755,102 +738,125 @@ def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: s
         req_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         }
-        for attempt in range(5):
+        for _verify in range(5):
             try:
                 r_head = requests.head(raw_asset_url, allow_redirects=True, timeout=15, headers=req_headers)
                 if r_head.status_code == 200:
                     direct_url = r_head.url
-                    print("[DropEmbed 1080p Relay] Verified release asset CDN URL (HTTP 200).")
+                    print("[Streamtape Relay] Verified release asset CDN URL (HTTP 200).")
                     break
                 else:
-                    print(f"[DropEmbed 1080p Relay] Asset check returned HTTP {r_head.status_code}, retrying...")
+                    print(f"[Streamtape Relay] Asset check returned HTTP {r_head.status_code}, retrying...")
             except (requests.RequestException, OSError) as e:
-                print(f"[DropEmbed 1080p Relay] Asset check warning: {e}")
+                print(f"[Streamtape Relay] Asset check warning: {e}")
             time.sleep(2)
 
-        print("[DropEmbed 1080p Relay] Submitting direct 1080p link to DropEmbed remote-upload...")
-        remote_url = "https://upload.dropembed.com/api/videos/remote-upload"
-        payload = {"urls": [direct_url]}
+        # Submit to Streamtape remote upload API
+        print("[Streamtape Relay] Submitting direct link to Streamtape remote upload...")
+        safe_name = re.sub(r'[^\w\s\-\.\(\)\[\]]', '', title).strip() or video_path.stem
+        if not safe_name.lower().endswith('.mp4'):
+            safe_name += '.mp4'
 
-        data = None
+        remote_params = {"url": direct_url, "name": safe_name}
+        if folder_id:
+            remote_params["folder"] = folder_id
+
+        remote_data = None
         for attempt in range(1, 4):
             try:
-                res_data = dropembed_api_request("POST", remote_url, api_key, payload=payload, timeout=30)
-                if res_data.get("success"):
-                    data = res_data
+                res_data = streamtape_api_request(
+                    "remotedl/add", st_login, st_key,
+                    extra_params=remote_params, timeout=30,
+                )
+                if res_data.get("status") == 200 and res_data.get("result"):
+                    remote_data = res_data
                     break
-                print(f"[DropEmbed 1080p Relay] Attempt {attempt} response: {res_data}")
+                print(f"[Streamtape Relay] Attempt {attempt} response: {res_data}")
             except Exception as e:  # noqa: BLE001
-                print(f"[DropEmbed 1080p Relay] Attempt {attempt} failed: {e}")
+                print(f"[Streamtape Relay] Attempt {attempt} failed: {e}")
             time.sleep(3)
 
-        if not data or not data.get("success"):
-            raise RuntimeError(f"DropEmbed remote-upload failed after retries: {data}")
+        if not remote_data or remote_data.get("status") != 200:
+            raise RuntimeError(f"Streamtape remote upload failed after retries: {remote_data}")
 
-        tasks = data.get("tasks", [])
-        video_id = None
-        if tasks:
-            task = tasks[0]
-            video_id = task.get("video_id")
-        else:
-            # Fallback: check videos list if already queued
-            try:
-                list_res = dropembed_api_request("GET", "https://upload.dropembed.com/api/videos", api_key, timeout=15)
-                v_list = list_res.get("data", [])
-                for v in v_list:
-                    desc = v.get("description") or ""
-                    if direct_url in desc or raw_asset_url in desc:
-                        video_id = v.get("id")
-                        break
-            except Exception as list_err:  # noqa: BLE001
-                print(f"[DropEmbed 1080p Relay] Video list fallback warning: {list_err}")
+        remote_id = remote_data.get("result", {}).get("id", "")
+        if not remote_id:
+            raise RuntimeError(f"Streamtape returned no remote upload ID: {remote_data}")
 
-        if not video_id:
-            raise RuntimeError(f"DropEmbed returned no video_id: {data}")
+        print(f"[Streamtape Relay] Remote upload queued! Task ID: {remote_id}")
 
-        print(f"[DropEmbed 1080p Relay] Transfer queued! Assigned Video ID: {video_id}")
-
-        # Update title on DropEmbed
-        try:
-            patch_url = f"https://upload.dropembed.com/api/videos/{video_id}"
-            dropembed_api_request("PATCH", patch_url, api_key, payload={"title": title}, timeout=10)
-        except Exception:  # noqa: BLE001, S110
-            pass
-
-        # Wait for DropEmbed servers to finish downloading the asset before deleting the release
-        print("[DropEmbed 1080p Relay] Monitoring DropEmbed cloud-to-cloud transfer progress...")
-        poll_url = f"https://upload.dropembed.com/api/videos/{video_id}"
-        transfer_done = False
-        for poll_i in range(30):
+        # Poll for completion — Streamtape sets status='finished' and populates 'url' when done
+        print("[Streamtape Relay] Monitoring Streamtape server-side download progress...")
+        file_id = None
+        for poll_i in range(60):
             time.sleep(5)
             try:
-                poll_data = dropembed_api_request("GET", poll_url, api_key, timeout=15).get("data", {})
-                v_status = poll_data.get("status")
-                v_size = poll_data.get("file_size", 0)
-                print(f"[DropEmbed 1080p Relay] Status: {v_status} | Size: {v_size} bytes ({(poll_i + 1) * 5}s)")
-                if v_status in ("processing", "ready") or (v_size and v_size > 0):
-                    print("[DropEmbed 1080p Relay] Transfer completed! DropEmbed has received full 1080p file.")
-                    transfer_done = True
-                    break
-                elif v_status == "error":
-                    print("[DropEmbed 1080p Relay] DropEmbed reported error during transfer.")
-                    break
-            except Exception as poll_err:  # noqa: BLE001
-                print(f"[DropEmbed 1080p Relay] Poll check warning: {poll_err}")
+                status_data = streamtape_api_request(
+                    "remotedl/status", st_login, st_key,
+                    extra_params={"id": remote_id}, timeout=15,
+                )
+                if status_data.get("status") == 200 and status_data.get("result"):
+                    result = status_data["result"]
+                    # Result is keyed by the remote upload ID
+                    task_info = result.get(remote_id, {}) if isinstance(result, dict) else {}
+                    task_status = task_info.get("status", "unknown")
+                    bytes_loaded = task_info.get("bytes_loaded") or 0
+                    bytes_total = task_info.get("bytes_total") or 0
+                    task_url = task_info.get("url")
 
-        if not transfer_done:
-            print("[DropEmbed 1080p Relay] Transfer wait timeout reached, proceeding...")
+                    pct_str = ""
+                    if bytes_total and int(bytes_total) > 0:
+                        pct_str = f" ({int(int(bytes_loaded) / int(bytes_total) * 100)}%)"
+
+                    print(f"[Streamtape Relay] Status: {task_status}{pct_str} ({(poll_i + 1) * 5}s)")
+
+                    if task_status == "finished" or (task_url and task_url is not False and str(task_url).startswith("http")):
+                        # Extract file ID from the URL (format: https://streamtape.com/v/{id}/filename.mp4)
+                        if task_url and isinstance(task_url, str):
+                            url_parts = task_url.rstrip("/").split("/")
+                            for idx, part in enumerate(url_parts):
+                                if part == "v" and idx + 1 < len(url_parts):
+                                    file_id = url_parts[idx + 1]
+                                    break
+                        if not file_id:
+                            file_id = task_info.get("extid") or remote_id
+                        print("[Streamtape Relay] Transfer completed!")
+                        break
+                    elif task_status == "error":
+                        print("[Streamtape Relay] Streamtape reported error during transfer.")
+                        break
+            except Exception as poll_err:  # noqa: BLE001
+                print(f"[Streamtape Relay] Poll check warning: {poll_err}")
+
+        if not file_id:
+            # Try to find it in the folder listing
+            try:
+                list_params = {"folder": folder_id} if folder_id else None
+                list_data = streamtape_api_request(
+                    "file/listfolder", st_login, st_key,
+                    extra_params=list_params, timeout=15,
+                )
+                for f_item in list_data.get("result", {}).get("files", []):
+                    if safe_name in (f_item.get("name") or ""):
+                        file_id = f_item.get("linkid")
+                        break
+            except Exception:  # noqa: BLE001, S110
+                pass
+
+        if not file_id:
+            print("[Streamtape Relay] Warning: Could not determine final file ID. Using remote task ID as placeholder.")
+            file_id = remote_id
 
         return {
             "success": True,
-            "video_id": video_id,
+            "video_id": file_id,
             "title": title,
-            "url": f"https://dropembed.com/v/{video_id}",
-            "embed_url": f"https://dropembed.com/e/{video_id}",
+            "url": f"https://streamtape.com/v/{file_id}",
+            "embed_url": f"https://streamtape.com/e/{file_id}",
         }
 
     except subprocess.CalledProcessError as e:
-        print(f"[DropEmbed 1080p Relay Error] gh release create failed (exit {e.returncode}):")
+        print(f"[Streamtape Relay Error] gh release create failed (exit {e.returncode}):")
         if e.stdout:
             print("Stdout:", e.stdout)
         if e.stderr:
@@ -869,7 +875,7 @@ def upload_to_dropembed(video_path: Path, title: str, api_key: str, folder_id: s
         del_cmd = ["gh", "release", "delete", tag, "-y", "--repo", repo_env]
         try:
             subprocess.run(del_cmd, capture_output=True, text=True, check=False)
-            print("[DropEmbed 1080p Relay] Temporary release asset cleaned up.")
+            print("[Streamtape Relay] Temporary release asset cleaned up.")
         except subprocess.SubprocessError:
             pass
 
@@ -920,7 +926,7 @@ def save_catalog(record: dict, repo_root: Path) -> None:
     # Also generate human-readable Markdown table in data/videos.md
     md_path = data_dir / "videos.md"
     md_lines = [
-        "# 🎬 DropEmbed Video Catalog\n",
+        "# 🎬 Streamtape Video Catalog\n",
         f"*Total Videos Uploaded: {len(catalog)}*\n",
         "| Date | Title | Season | Episode | Part | MAL | Score | Watch Link | Embed Player Link |",
         "|---|---|---|---|---|---|---|---|---|",
@@ -958,7 +964,7 @@ def notify_cpanel_database(record: dict) -> None:
 
     headers = {
         "Content-Type": "application/json",
-        "User-Agent": "GitHubActions-DropEmbedPipeline/1.0",
+        "User-Agent": "GitHubActions-StreamtapePipeline/1.0",
         "Host": "jeevankart.in",
     }
     if cpanel_secret:
@@ -1015,7 +1021,7 @@ def write_github_summary(record: dict) -> None:
     poster_markdown = f"\n![Poster]({v_poster})\n" if v_poster else ""
 
     summary_content = f"""
-### 🚀 DropEmbed Upload Complete!
+### 🚀 Streamtape Upload Complete!
 
 {poster_markdown}
 
@@ -1031,7 +1037,7 @@ def write_github_summary(record: dict) -> None:
 | **Source ID** | {f'#{v_source_id}' if v_source_id else 'N/A'} |
 | **File Size** | {v_size:.2f} MB |
 | **Genres** | {v_genres} |
-| **Watch URL** | [Open in DropEmbed]({v_url}) |
+| **Watch URL** | [Open in Streamtape]({v_url}) |
 | **Embed URL** | [Open Player]({v_embed}) |
 
 {f"> **Synopsis:** {v_desc[:280]}..." if v_desc else ""}
@@ -1046,16 +1052,18 @@ def write_github_summary(record: dict) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Torrent/AnimeTosho to DropEmbed Cloud Pipeline")
+    parser = argparse.ArgumentParser(description="Torrent/AnimeTosho to Streamtape Cloud Pipeline")
     parser.add_argument("--source", required=True, help="Magnet link, .torrent link, or AnimeTosho view URL")
     parser.add_argument("--title", default="", help="Custom title for the video")
-    parser.add_argument("--folder-id", default="", help="Optional DropEmbed folder ID")
-    parser.add_argument("--api-key", default="", help="DropEmbed API Key (or set DROPEMBED_API_KEY env)")
+    parser.add_argument("--folder-id", default="", help="Optional Streamtape folder ID")
+    parser.add_argument("--st-login", default="", help="Streamtape API Login (or set STREAMTAPE_LOGIN env)")
+    parser.add_argument("--st-key", default="", help="Streamtape API Key (or set STREAMTAPE_KEY env)")
     args = parser.parse_args()
 
-    api_key = args.api_key or os.environ.get("DROPEMBED_API_KEY")
-    if not api_key:
-        print("[Error] DropEmbed API Key is required! Set DROPEMBED_API_KEY env or use --api-key.")
+    st_login = args.st_login or os.environ.get("STREAMTAPE_LOGIN")
+    st_key = args.st_key or os.environ.get("STREAMTAPE_KEY")
+    if not st_login or not st_key:
+        print("[Error] Streamtape credentials required! Set STREAMTAPE_LOGIN + STREAMTAPE_KEY env vars or use --st-login + --st-key.")
         sys.exit(1)
 
     repo_root = Path(__file__).resolve().parent.parent
@@ -1077,23 +1085,24 @@ def main():
         # Step 4: Fetch Official MyAnimeList Metadata (MAL ID, Score, Poster, Synopsis, Genres)
         mal_meta = fetch_mal_metadata(final_title)
 
-        # Step 5: Stream Upload to DropEmbed
-        upload_res = upload_to_dropembed(
+        # Step 5: Stream Upload to Streamtape
+        upload_res = upload_to_streamtape(
             video_path=video_file,
             title=final_title,
-            api_key=api_key,
+            st_login=st_login,
+            st_key=st_key,
             folder_id=args.folder_id,
         )
 
         video_id = upload_res.get("video_id", "")
-        embed_url = upload_res.get("embed_url") or f"https://dropembed.com/e/{video_id}"
-        watch_url = upload_res.get("url") or f"https://dropembed.com/v/{video_id}"
+        embed_url = upload_res.get("embed_url") or f"https://streamtape.com/e/{video_id}"
+        watch_url = upload_res.get("url") or f"https://streamtape.com/v/{video_id}"
 
         thumb_url = animetosho_thumb or ""
         if not thumb_url and not mal_meta.get("poster_url") and video_id:
             try:
-                info_r = dropembed_api_request("GET", f"https://upload.dropembed.com/api/videos/{video_id}", api_key, timeout=10)
-                thumb_url = info_r.get("data", {}).get("thumbnail") or ""
+                info_r = streamtape_api_request("file/info", st_login, st_key, extra_params={"file": video_id}, timeout=10)
+                thumb_url = ""  # Streamtape does not expose thumbnails via file/info; use getsplash API if needed
             except Exception:  # noqa: BLE001, S110
                 pass
 

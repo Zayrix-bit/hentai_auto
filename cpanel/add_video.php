@@ -43,8 +43,8 @@ if (!$data || empty($data['video_id']) || empty($data['title'])) {
 
 $title         = $data['title'];
 $video_id      = $data['video_id'];
-$embed_url     = isset($data['embed_url']) ? $data['embed_url'] : "https://dropembed.com/e/{$video_id}";
-$watch_url     = isset($data['url']) ? $data['url'] : "https://dropembed.com/v/{$video_id}";
+$embed_url     = isset($data['embed_url']) ? $data['embed_url'] : "https://streamtape.com/e/{$video_id}";
+$watch_url     = isset($data['url']) ? $data['url'] : "https://streamtape.com/v/{$video_id}";
 $file_name     = isset($data['file_name']) ? $data['file_name'] : null;
 $file_size_mb  = isset($data['file_size_mb']) ? floatval($data['file_size_mb']) : null;
 $source_input  = isset($data['source_input']) ? $data['source_input'] : null;

@@ -1,20 +1,23 @@
 name: HentaiDB 2D Anime Pipeline (Cloud Parallel Workers)
 
 on:
+  schedule:
+    # Runs at :30 of every hour UTC automatically
+    - cron: '30 * * * *'
   workflow_dispatch:
     inputs:
       videos_count:
         description: 'Number of targets to crawl and upload (e.g. 50)'
         required: false
-        default: '200'
+        default: '50'
       start_series_index:
         description: 'Start series index in directory (0-2080)'
         required: false
-        default: '101'
+        default: '0'
       max_videos_per_worker:
         description: 'Max videos per worker'
         required: false
-        default: '25'
+        default: '10'
 
 concurrency:
   group: hentaidb-pipeline
@@ -111,10 +114,11 @@ jobs:
           name: hentaidb-targets
           path: data
 
-      - name: Process Worker (CDN MP4 -> DropEmbed -> cPanel)
+      - name: Process Worker (CDN MP4 -> Streamtape -> cPanel)
         env:
           PYTHONPATH: .
-          DROPEMBED_API_KEY: ${{ secrets.DROPEMBED_API_KEY }}
+          STREAMTAPE_LOGIN: ${{ secrets.STREAMTAPE_LOGIN }}
+          STREAMTAPE_KEY: ${{ secrets.STREAMTAPE_KEY }}
           CPANEL_API_URL: ${{ secrets.CPANEL_API_URL }}
           CPANEL_API_SECRET: ${{ secrets.CPANEL_API_SECRET }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

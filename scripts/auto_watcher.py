@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Auto Watcher: Fully Automated Torrent Feed -> DropEmbed & cPanel Pipeline
-Fetches latest anime/hentai releases from RSS feeds (Sukebei Nyaa / AnimeTosho),
-checks against existing database, and automatically downloads and streams to DropEmbed.
+Auto Watcher: HentaiDB (https://hentaidb.xyz) -> Streamtape & cPanel Pipeline
+Fetches pure 2D anime releases with direct Cloudflare CDN MP4 streams from HentaiDB,
+checks against existing catalog/database, downloads, and streams to Streamtape.
 """
 
 import json
@@ -13,11 +13,8 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
-
-from bs4 import BeautifulSoup
 
 # Ensure scripts directory is in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -25,7 +22,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # Import core pipeline methods
 from pipeline import (
     download_with_aria2,
-    dropembed_api_request,
     extract_season_episode_part,
     extract_source_id,
     fetch_mal_metadata,
@@ -34,67 +30,11 @@ from pipeline import (
     notify_cpanel_database,
     resolve_source,
     save_catalog,
-    upload_to_dropembed,
+    streamtape_api_request,
+    upload_to_streamtape,
     write_github_summary,
 )
 
-# Default Sukebei uploader & general fallback RSS feeds (Unblocked on GitHub cloud runners)
-DEFAULT_TARGET_USER = "Doomdos"
-DEFAULT_RSS_FEEDS = [
-    "https://sukebei.nyaa.si/?page=rss&c=1_1",  # English-translated Art/Anime
-    "https://sukebei.nyaa.si/?page=rss",        # All latest releases
-]
-
-
-def fetch_feed_items(feed_url: str, max_items: int = 15) -> list[dict]:
-    """
-    Parses RSS XML feed and returns list of items with title, link, and magnet.
-    """
-    print(f"[Auto Watcher] Fetching RSS feed: {feed_url}...")
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"}
-
-    try:
-        req = urllib.request.Request(feed_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            content = resp.read()
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
-        print(f"[Auto Watcher Warning] Failed to fetch {feed_url}: {e}")
-        return []
-
-    items = []
-    try:
-        root = ET.fromstring(content)
-        channel = root.find("channel")
-        if channel is None:
-            return []
-
-        for item in channel.findall("item")[:max_items]:
-            title = (item.findtext("title") or "").strip()
-            link = (item.findtext("link") or "").strip()
-            guid = (item.findtext("guid") or "").strip()
-
-            # Some feeds provide direct magnet or torrent download link
-            magnet = ""
-            for child in item:
-                # Nyaa specific namespace or enclosure
-                if "magnet" in child.tag.lower() or (child.text and child.text.startswith("magnet:?")):
-                    magnet = child.text.strip()
-                    break
-
-            # If no magnet in special tag, link or guid may be magnet or torrent URL
-            source_link = magnet or link or guid
-
-            if title and source_link:
-                items.append({
-                    "title": title,
-                    "source": source_link,
-                    "guid": guid or link,
-                })
-    except ET.ParseError as e:
-        print(f"[Auto Watcher Error] XML parse error for {feed_url}: {e}")
-
-    print(f"[Auto Watcher] Found {len(items)} items in feed.")
-    return items
 
 
 def normalize_title(title: str) -> str:
@@ -116,10 +56,10 @@ def normalize_title(title: str) -> str:
     return re.sub(r"\s+", " ", t)
 
 
-def fetch_dropembed_remote_catalog(api_key: str) -> dict:
+def fetch_streamtape_remote_catalog(st_login: str, st_key: str) -> dict:
     """
-    Queries live DropEmbed API (https://upload.dropembed.com/api/videos)
-    to fetch all currently uploaded videos for zero-duplicate enforcement.
+    Queries live Streamtape API (https://api.streamtape.com/file/listfolder)
+    to fetch all currently uploaded files for zero-duplicate enforcement.
     Returns: {"titles": set(), "norm_titles": set(), "video_ids": set()}
     """
     remote_data = {
@@ -127,188 +67,65 @@ def fetch_dropembed_remote_catalog(api_key: str) -> dict:
         "norm_titles": set(),
         "video_ids": set(),
     }
-    if not api_key:
+    if not st_login or not st_key:
         return remote_data
 
-    page = 1
-    max_pages = 10
+    folders_to_scan = [""]  # empty string = root folder
+    scanned_folders = set()
     total_found = 0
 
-    while page <= max_pages:
-        url = f"https://upload.dropembed.com/api/videos?page={page}&limit=100"
+    while folders_to_scan and len(scanned_folders) < 20:
+        folder_id = folders_to_scan.pop(0)
+        if folder_id in scanned_folders:
+            continue
+        scanned_folders.add(folder_id)
+
         try:
-            res = dropembed_api_request("GET", url, api_key, timeout=15)
-            raw_data = res.get("data", [])
-            items = []
-            if isinstance(raw_data, list):
-                items = raw_data
-            elif isinstance(raw_data, dict):
-                items = raw_data.get("videos") or raw_data.get("items") or raw_data.get("data") or []
+            params = {}
+            if folder_id:
+                params["folder"] = folder_id
+            res = streamtape_api_request("file/listfolder", st_login, st_key, extra_params=params, timeout=15)
+            result = res.get("result", {})
+            files = result.get("files", [])
+            subfolders = result.get("folders", [])
 
-            if not items:
-                break
+            for sf in subfolders:
+                sf_id = sf.get("id")
+                if sf_id and sf_id not in scanned_folders:
+                    folders_to_scan.append(sf_id)
 
-            for v in items:
-                v_id = v.get("id") or v.get("video_id")
-                if v.get("status") == "error":
-                    # Delete or ignore broken video from remote catalog to allow repair
-                    if v_id and api_key:
-                        try:
-                            dropembed_api_request("DELETE", f"https://upload.dropembed.com/api/videos/{v_id}", api_key, timeout=10)
-                            print(f"[DropEmbed Cleanup] Deleted broken error video {v_id} from account.")
-                        except Exception:
-                            pass
-                    continue
-
-                v_title = v.get("title") or ""
-                if v_title:
-                    remote_data["titles"].add(v_title.strip().lower())
-                    norm = normalize_title(v_title)
+            for f in files:
+                f_id = f.get("id")
+                f_name = f.get("name") or ""
+                if f_name:
+                    remote_data["titles"].add(f_name.strip().lower())
+                    stem = Path(f_name).stem
+                    remote_data["titles"].add(stem.strip().lower())
+                    norm = normalize_title(stem)
                     if norm:
                         remote_data["norm_titles"].add(norm)
-                if v_id:
-                    remote_data["video_ids"].add(str(v_id))
+                if f_id:
+                    remote_data["video_ids"].add(str(f_id))
 
-            total_found += len(items)
-            if len(items) < 100:
-                break
-            page += 1
+            total_found += len(files)
         except Exception as e:  # noqa: BLE001
-            print(f"[Auto Watcher] Notice: Remote DropEmbed catalog sync check ({e}). Continuing with local catalog.")
+            print(f"[Auto Watcher] Notice: Streamtape remote catalog sync check ({e}). Continuing with local catalog.")
             break
 
     if total_found > 0:
-        print(f"[Auto Watcher] Successfully synced {total_found} live videos directly from DropEmbed account.")
+        print(f"[Auto Watcher] Successfully synced {total_found} live videos directly from Streamtape account.")
     return remote_data
 
 
-def fetch_sukebei_user_items(username: str = DEFAULT_TARGET_USER, max_pages: int = 5) -> list[dict]:
-    """
-    Scrapes user uploads from Sukebei Nyaa (e.g. https://sukebei.nyaa.si/user/Doomdos).
-    Collects from both official RSS feed and multi-page HTML parsing to gather all releases.
-    Merges items cleanly by Sukebei ID/title with seeders count.
-    """
-    items_by_key = {}
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-
-    # 1. Try official user RSS feed first (fastest)
-    rss_url = f"https://sukebei.nyaa.si/?page=rss&u={urllib.parse.quote(username)}"
-    rss_items = fetch_feed_items(rss_url, max_items=100)
-    for it in rss_items:
-        it["uploader"] = username
-        sid = extract_source_id(it.get("source", "")) or extract_source_id(it.get("guid", ""))
-        norm = normalize_title(it.get("title", ""))
-        key = sid or norm or it.get("title", "").strip().lower()
-        if key:
-            it["source_id"] = sid
-            it["seeders"] = it.get("seeders", 1)  # Default seeders for RSS
-            items_by_key[key] = it
-
-    print(f"[Auto Watcher] Fetched {len(items_by_key)} items from {username} RSS feed.")
-
-    # 2. Scrape HTML user pages (for full catalogue / pagination)
-    for page in range(1, max_pages + 1):
-        page_url = f"https://sukebei.nyaa.si/user/{urllib.parse.quote(username)}?p={page}"
-        print(f"[Auto Watcher] Scraping {username} uploads page {page}: {page_url}...")
-        try:
-            req = urllib.request.Request(page_url, headers=headers)
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                html = resp.read().decode("utf-8", errors="ignore")
-
-            soup = BeautifulSoup(html, "html.parser")
-            table = soup.find("table", class_="torrent-list")
-            if not table:
-                print(f"[Auto Watcher] No torrent table found on page {page}. Reached end of uploads.")
-                break
-
-            tbody = table.find("tbody")
-            rows = tbody.find_all("tr") if tbody else table.find_all("tr")
-            page_found = 0
-
-            for tr in rows:
-                links = tr.find_all("a")
-                title = ""
-                view_url = ""
-                torrent_url = ""
-                magnet_url = ""
-
-                for a in links:
-                    href = a.get("href", "")
-                    if href.startswith("/view/") and not href.endswith("#comments"):
-                        title = a.get("title") or a.get_text(strip=True)
-                        view_url = urllib.parse.urljoin("https://sukebei.nyaa.si", href)
-                    elif href.startswith("/download/") and href.endswith(".torrent"):
-                        torrent_url = urllib.parse.urljoin("https://sukebei.nyaa.si", href)
-                    elif href.startswith("magnet:?"):
-                        magnet_url = href
-
-                tds = tr.find_all("td")
-                seeders = 0
-                if len(tds) >= 6:
-                    try:
-                        seeders = int(tds[5].get_text(strip=True).replace(",", ""))
-                    except (ValueError, TypeError):
-                        seeders = 0
-
-                source_link = torrent_url or magnet_url or view_url
-                if not (title and source_link):
-                    continue
-
-                sid = extract_source_id(torrent_url) or extract_source_id(view_url) or extract_source_id(source_link)
-                norm = normalize_title(title)
-                key = sid or norm or title.strip().lower()
-
-                if key in items_by_key:
-                    # Upgrade with direct .torrent URL & real seeders
-                    existing = items_by_key[key]
-                    if torrent_url:
-                        existing["torrent"] = torrent_url
-                        existing["source"] = torrent_url  # Prefer .torrent over magnet for faster aria2c start
-                    if magnet_url:
-                        existing["magnet"] = magnet_url
-                    existing["seeders"] = max(existing.get("seeders", 0), seeders)
-                    if sid:
-                        existing["source_id"] = sid
-                else:
-                    items_by_key[key] = {
-                        "title": title,
-                        "source": source_link,
-                        "guid": view_url or source_link,
-                        "torrent": torrent_url,
-                        "magnet": magnet_url,
-                        "uploader": username,
-                        "seeders": seeders,
-                        "source_id": sid,
-                    }
-                    page_found += 1
-
-            print(f"[Auto Watcher] Page {page} processed ({page_found} new releases discovered, total {len(items_by_key)} unique releases so far).")
-            if not rows or (page_found == 0 and page > 2):
-                break
-
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                print(f"[Auto Watcher] Page {page} returned 404. Reached end of catalog.")
-                break
-            print(f"[Auto Watcher Warning] HTTP {e.code} on page {page}: {e}")
-            break
-        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
-            print(f"[Auto Watcher Warning] Could not scrape {username} page {page}: {e}")
-            break
-
-    all_items = list(items_by_key.values())
-    print(f"[Auto Watcher] Total {len(all_items)} unique releases collected from provider {username}.")
-    return all_items
 
 
-def load_processed_records(repo_root: Path, api_key: str = "") -> dict:
+
+def load_processed_records(repo_root: Path, st_login: str = "", st_key: str = "") -> dict:
     """
     Loads sets of already processed records to prevent duplicate downloads and uploads.
     Checks:
     1. Local videos.json (source_id, video_id, source_input, raw title, normalized title)
-    2. Remote DropEmbed catalog (all live video IDs and titles on DropEmbed account)
+    2. Remote Streamtape catalog (all live video IDs and titles on Streamtape account)
     """
     processed = {
         "source_ids": set(),
@@ -349,9 +166,9 @@ def load_processed_records(repo_root: Path, api_key: str = "") -> dict:
         except (json.JSONDecodeError, OSError) as e:
             print(f"[Auto Watcher Warning] Could not parse local videos.json: {e}")
 
-    # 2. Remote DropEmbed catalog
-    if api_key:
-        remote = fetch_dropembed_remote_catalog(api_key)
+    # 2. Remote Streamtape catalog
+    if st_login and st_key:
+        remote = fetch_streamtape_remote_catalog(st_login, st_key)
         processed["raw_titles"].update(remote["titles"])
         processed["normalized_titles"].update(remote["norm_titles"])
         processed["video_ids"].update(remote["video_ids"])
@@ -391,25 +208,24 @@ def is_already_processed(item: dict, processed: dict) -> bool:
 
 
 def run_auto_watcher(
-    max_new_videos: int = 85,
-    target_user: str = DEFAULT_TARGET_USER,
-    max_pages: int = 5,
+    max_new_videos: int = 50,
     worker_index: int = 0,
     total_workers: int = 1,
     targets_file: str = "",
 ) -> None:
     """
-    Main loop: Checks target uploader (e.g. Doomdos) or explicit targets file,
+    Main loop: Checks targets file (or defaults to HentaiDB targets),
     finds unprocessed items, shards work across parallel workers, downloads,
-    uploads, and updates catalogs and database.
+    uploads to Streamtape, and updates catalogs and database.
     """
-    api_key = os.environ.get("DROPEMBED_API_KEY")
-    if not api_key:
-        print("[Auto Watcher Error] DROPEMBED_API_KEY environment variable is required!")
+    st_login = os.environ.get("STREAMTAPE_LOGIN", "")
+    st_key = os.environ.get("STREAMTAPE_KEY", "")
+    if not st_login or not st_key:
+        print("[Auto Watcher Error] STREAMTAPE_LOGIN and STREAMTAPE_KEY environment variables are required!")
         sys.exit(1)
 
     repo_root = Path(__file__).resolve().parent.parent
-    processed = load_processed_records(repo_root, api_key=api_key)
+    processed = load_processed_records(repo_root, st_login=st_login, st_key=st_key)
     print(
         f"[Auto Watcher] Anti-Overlay Index: {len(processed['source_ids'])} source IDs, "
         f"{len(processed['raw_titles'])} titles, {len(processed['video_ids'])} video IDs active."
@@ -417,7 +233,7 @@ def run_auto_watcher(
 
     candidate_items = []
 
-    # Priority 0: Explicit targets file if provided (e.g. data/missing_targets.json)
+    # Priority 0: Explicit targets file if provided (e.g. data/hentaidb_targets.json)
     if targets_file:
         tf_path = Path(targets_file)
         if not tf_path.is_absolute():
@@ -429,24 +245,28 @@ def run_auto_watcher(
         else:
             print(f"[Auto Watcher Warning] Specified targets file not found: {tf_path}")
 
-    # Priority 1: Fetch from target uploader (Doomdos)
-    elif target_user:
-        print(f"[Auto Watcher] Targeting provider: {target_user}...")
-        user_items = fetch_sukebei_user_items(username=target_user, max_pages=max_pages)
-        if user_items:
-            candidate_items.extend(user_items)
-
-    # Priority 2: Fallback to general feeds if no candidate items found
+    # Fallback: check default data/hentaidb_targets.json
     if not candidate_items:
-        print("[Auto Watcher] Target user returned no items. Checking general RSS feeds...")
-        for feed in DEFAULT_RSS_FEEDS:
-            items = fetch_feed_items(feed)
-            if items:
-                candidate_items.extend(items)
-                break
+        default_targets = repo_root / "data" / "hentaidb_targets.json"
+        if default_targets.is_file():
+            try:
+                with open(default_targets, "r", encoding="utf-8") as f:
+                    candidate_items.extend(json.load(f))
+                print(f"[Auto Watcher] Loaded {len(candidate_items)} targets from default {default_targets.name}")
+            except Exception as e:
+                print(f"[Auto Watcher Warning] Could not load {default_targets}: {e}")
+
+    # Priority 1: Crawl fresh targets directly from HentaiDB (https://hentaidb.xyz)
+    if not candidate_items:
+        print("[Auto Watcher] No cached targets found. Crawling fresh releases from HentaiDB...")
+        try:
+            from crawl_hentaidb_targets import crawl_hentaidb_batch
+            candidate_items = crawl_hentaidb_batch(target_count=max_new_videos)
+        except Exception as e:
+            print(f"[Auto Watcher Error] Failed crawling HentaiDB: {e}")
 
     if not candidate_items:
-        print("[Auto Watcher] No feed items found. Exiting.")
+        print("[Auto Watcher] No candidate items found. Exiting.")
         return
 
     # Filter out already processed with strict deduplication
@@ -551,24 +371,19 @@ def run_auto_watcher(
                 # 4. Fetch Official MyAnimeList Metadata (MAL ID, Score, Poster, Synopsis, Genres)
                 mal_meta = fetch_mal_metadata(cur_title)
 
-                # 5. Stream upload to DropEmbed
-                upload_res = upload_to_dropembed(
+                # 5. Stream upload to Streamtape
+                upload_res = upload_to_streamtape(
                     video_path=video_file,
                     title=cur_title,
-                    api_key=api_key,
+                    st_login=st_login,
+                    st_key=st_key,
                 )
 
                 video_id = upload_res.get("video_id", "")
-                embed_url = upload_res.get("embed_url") or f"https://dropembed.com/e/{video_id}"
-                watch_url = upload_res.get("url") or f"https://dropembed.com/v/{video_id}"
+                embed_url = upload_res.get("embed_url") or f"https://streamtape.com/e/{video_id}"
+                watch_url = upload_res.get("url") or f"https://streamtape.com/v/{video_id}"
 
                 thumb_url = animetosho_thumb or ""
-                if not thumb_url and not mal_meta.get("poster_url") and video_id:
-                    try:
-                        info_r = dropembed_api_request("GET", f"https://upload.dropembed.com/api/videos/{video_id}", api_key, timeout=10)
-                        thumb_url = info_r.get("data", {}).get("thumbnail") or ""
-                    except Exception:
-                        pass
 
                 source_id = extract_source_id(item["source"]) or item.get("source_id", "")
 
@@ -650,23 +465,18 @@ def run_auto_watcher(
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Automated Sukebei/Nyaa Watcher for DropEmbed Pipeline")
-    parser.add_argument("max_count", nargs="?", type=int, default=None, help="Max new videos to process (positional shortcut)")
-    parser.add_argument("--max-videos", "-n", type=int, default=85, help="Max new videos to process (default: 85)")
-    parser.add_argument("--user", "-u", type=str, default=DEFAULT_TARGET_USER, help=f"Target Sukebei/Nyaa uploader (default: {DEFAULT_TARGET_USER})")
-    parser.add_argument("--pages", "-p", type=int, default=5, help="Max user profile pages to scrape (default: 5)")
+    parser = argparse.ArgumentParser(description="HentaiDB to Streamtape Automated Pipeline")
+    parser.add_argument("max_count", nargs="?", type=int, default=None, help="Max new videos to process")
+    parser.add_argument("--max-videos", "-n", type=int, default=50, help="Max new videos to process (default: 50)")
     parser.add_argument("--worker-index", "-w", type=int, default=0, help="Parallel worker index (0-indexed, default: 0)")
     parser.add_argument("--total-workers", "-t", type=int, default=1, help="Total parallel matrix workers (default: 1)")
-    parser.add_argument("--targets-file", "-f", type=str, default="", help="Path to JSON file containing explicit candidate releases")
+    parser.add_argument("--targets-file", "-f", type=str, default="", help="Path to JSON file containing targets (default: data/hentaidb_targets.json)")
     args = parser.parse_args()
 
     max_vids = args.max_count if args.max_count is not None else args.max_videos
-    target_u = os.environ.get("TARGET_UPLOADER", args.user)
 
     run_auto_watcher(
         max_new_videos=max_vids,
-        target_user=target_u,
-        max_pages=args.pages,
         worker_index=args.worker_index,
         total_workers=args.total_workers,
         targets_file=args.targets_file,

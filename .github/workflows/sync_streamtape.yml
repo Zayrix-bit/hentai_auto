@@ -1,10 +1,10 @@
-name: Sync DropEmbed Live Videos to Catalog & cPanel
+name: Sync Streamtape Live Videos to Catalog & cPanel
 
 on:
   workflow_dispatch:
 
 concurrency:
-  group: sync-dropembed-catalog
+  group: sync-streamtape-catalog
   cancel-in-progress: false
 
 permissions:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   sync_and_catalog:
-    name: Sync DropEmbed Account -> cPanel DB & Catalog
+    name: Sync Streamtape Account -> cPanel DB & Catalog
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -32,14 +32,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r scripts/requirements.txt
 
-      - name: Run DropEmbed Catalog Sync
+      - name: Run Streamtape Catalog Sync
         env:
           PYTHONPATH: .
-          DROPEMBED_API_KEY: ${{ secrets.DROPEMBED_API_KEY }}
+          STREAMTAPE_LOGIN: ${{ secrets.STREAMTAPE_LOGIN }}
+          STREAMTAPE_KEY: ${{ secrets.STREAMTAPE_KEY }}
           CPANEL_API_URL: ${{ secrets.CPANEL_API_URL }}
           CPANEL_API_SECRET: ${{ secrets.CPANEL_API_SECRET }}
         run: |
-          python scripts/sync_dropembed_catalog.py
+          python scripts/sync_streamtape_catalog.py
 
       - name: Analyze Series Completeness
         run: |
@@ -53,7 +54,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "No new videos to commit."
           else
-            git commit -m "chore(sync): recover uncataloged live DropEmbed uploads and sync cPanel [skip ci]"
+            git commit -m "chore(sync): recover uncataloged live Streamtape uploads and sync cPanel [skip ci]"
             git pull --rebase
             git push
           fi

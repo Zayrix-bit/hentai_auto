@@ -76,7 +76,7 @@ Apne GitHub Repository (`Zayrix-bit/hentai_auto`) me jayein:
 
 ### 🎉 Done! Kaise Test Karein?
 Jab bhi GitHub Actions par video upload complete hoga:
-1. Video DropEmbed par upload hogi.
+1. Video Streamtape par upload hogi.
 2. Automatically `https://jeevankart.in/api/add_video.php` ko data bhejegi.
 3. cPanel MySQL me record insert ho jayega.
 4. Aap `https://jeevankart.in/player.html` open karke apni saari uploaded videos directly dekh sakte hain!
